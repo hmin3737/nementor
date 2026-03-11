@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/app_colors.dart';
 import '../../../core/app_router.dart';
@@ -6,12 +7,13 @@ import '../../../core/app_spacing.dart';
 import '../../../core/app_strings.dart';
 import '../../../core/app_typography.dart';
 import '../../../shared/models/user_model.dart';
+import '../providers/auth_provider.dart';
 
-class RoleSelectScreen extends StatelessWidget {
+class RoleSelectScreen extends ConsumerWidget {
   const RoleSelectScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
       backgroundColor: AppColors.primary,
       appBar: AppBar(
@@ -19,11 +21,13 @@ class RoleSelectScreen extends StatelessWidget {
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white),
-          onPressed: () => context.pop(),
+          onPressed: () async {
+            await ref.read(authNotifierProvider.notifier).signOut();
+          },
         ),
       ),
       body: SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.x2l),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -37,7 +41,7 @@ class RoleSelectScreen extends StatelessWidget {
               Text(
                 AppStrings.signupRoleSubtitle,
                 style: AppTypography.callout.copyWith(
-                  color: Colors.white.withOpacity(0.6),
+                  color: Colors.white.withValues(alpha:0.6),
                   height: 1.6,
                 ),
               ),
@@ -59,12 +63,12 @@ class RoleSelectScreen extends StatelessWidget {
                 accentColor: AppColors.consultAccent,
                 onTap: () => context.go(AppRoutes.mentorSignup),
               ),
-              const Spacer(),
+              const SizedBox(height: AppSpacing.x3l),
               Center(
                 child: Text(
                   '선택한 역할로 가입 후 변경이 불가해요',
                   style: AppTypography.caption.copyWith(
-                    color: Colors.white.withOpacity(0.4),
+                    color: Colors.white.withValues(alpha:0.4),
                   ),
                 ),
               ),
@@ -130,9 +134,9 @@ class _RoleCardState extends State<_RoleCard>
         child: Container(
           padding: const EdgeInsets.all(AppSpacing.xl),
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.07),
+            color: Colors.white.withValues(alpha:0.07),
             borderRadius: BorderRadius.circular(AppSpacing.cardRadius),
-            border: Border.all(color: Colors.white.withOpacity(0.12)),
+            border: Border.all(color: Colors.white.withValues(alpha:0.12)),
           ),
           child: Row(
             children: [
@@ -140,7 +144,7 @@ class _RoleCardState extends State<_RoleCard>
                 width: 56,
                 height: 56,
                 decoration: BoxDecoration(
-                  color: widget.accentColor.withOpacity(0.15),
+                  color: widget.accentColor.withValues(alpha:0.15),
                   borderRadius: BorderRadius.circular(14),
                 ),
                 child: Icon(widget.icon, color: widget.accentColor, size: 28),
@@ -160,7 +164,7 @@ class _RoleCardState extends State<_RoleCard>
                     Text(
                       widget.description,
                       style: AppTypography.footnote.copyWith(
-                        color: Colors.white.withOpacity(0.6),
+                        color: Colors.white.withValues(alpha:0.6),
                       ),
                     ),
                   ],
@@ -168,7 +172,7 @@ class _RoleCardState extends State<_RoleCard>
               ),
               Icon(
                 Icons.arrow_forward_ios,
-                color: Colors.white.withOpacity(0.3),
+                color: Colors.white.withValues(alpha:0.3),
                 size: 16,
               ),
             ],

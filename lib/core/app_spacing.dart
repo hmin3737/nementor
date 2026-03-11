@@ -49,7 +49,7 @@ abstract final class AppSpacing {
   // ── 그림자 ──────────────────────────────────────────────────
   static List<BoxShadow> get cardShadow => [
         BoxShadow(
-          color: const Color(0xFF000000).withOpacity(0.06),
+          color: const Color(0xFF000000).withValues(alpha: 0.06),
           blurRadius: 12,
           offset: const Offset(0, 2),
         ),
@@ -57,7 +57,7 @@ abstract final class AppSpacing {
 
   static List<BoxShadow> get elevatedShadow => [
         BoxShadow(
-          color: const Color(0xFF000000).withOpacity(0.10),
+          color: const Color(0xFF000000).withValues(alpha: 0.10),
           blurRadius: 20,
           offset: const Offset(0, 4),
         ),

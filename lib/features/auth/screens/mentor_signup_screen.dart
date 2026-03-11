@@ -9,6 +9,7 @@ import '../../../core/app_typography.dart';
 import '../../../shared/models/user_model.dart';
 import '../../../shared/widgets/app_button.dart';
 import '../providers/auth_provider.dart';
+import '../../../shared/services/supabase_service.dart';
 
 class MentorSignupScreen extends ConsumerStatefulWidget {
   const MentorSignupScreen({super.key});
@@ -54,14 +55,26 @@ class _MentorSignupScreenState extends ConsumerState<MentorSignupScreen> {
       _checkingNick = true;
       _nicknameAvailable = null;
     });
-    final ok =
-        await ref.read(authServiceProvider).isNicknameAvailable(nick);
-    if (!mounted) return;
-    setState(() {
-      _nicknameAvailable = ok;
-      _checkingNick = false;
-      _lastCheckedNick = nick;
-    });
+    try {
+      final ok = await ref.read(authServiceProvider).isNicknameAvailable(nick);
+      if (!mounted) return;
+      setState(() {
+        _nicknameAvailable = ok;
+        _checkingNick = false;
+        _lastCheckedNick = nick;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _checkingNick = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('닉네임 확인 중 오류가 발생했어요: $e'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+    }
   }
 
   Future<void> _submit() async {
@@ -78,6 +91,7 @@ class _MentorSignupScreenState extends ConsumerState<MentorSignupScreen> {
       final supabase = ref.read(authServiceProvider);
       await _saveMentorProfile(supabase, user.id);
 
+      if (!mounted) return;
       context.go(AppRoutes.mentorFeed);
     } catch (e) {
       if (!mounted) return;
@@ -91,8 +105,30 @@ class _MentorSignupScreenState extends ConsumerState<MentorSignupScreen> {
   }
 
   Future<void> _saveMentorProfile(dynamic service, String userId) async {
-    // AuthService를 통해 mentor_profiles 업데이트
-    // 실제 구현은 mentorService 등으로 분리 예정
+    await SupabaseService.client
+        .from(SupabaseService.mentorProfilesTable)
+        .upsert({
+      'user_id': userId,
+      'real_name': _realNameCtrl.text.trim().isEmpty
+          ? null
+          : _realNameCtrl.text.trim(),
+      'middle_school': _middleSchoolCtrl.text.trim().isEmpty
+          ? null
+          : _middleSchoolCtrl.text.trim(),
+      'high_school': _highSchoolCtrl.text.trim().isEmpty
+          ? null
+          : _highSchoolCtrl.text.trim(),
+      'university': _universityCtrl.text.trim().isEmpty
+          ? null
+          : _universityCtrl.text.trim(),
+      'department': _departmentCtrl.text.trim().isEmpty
+          ? null
+          : _departmentCtrl.text.trim(),
+      'intro':
+          _introCtrl.text.trim().isEmpty ? null : _introCtrl.text.trim(),
+      'bio': _bioCtrl.text.trim().isEmpty ? null : _bioCtrl.text.trim(),
+      'subjects': _selectedSubjects,
+    });
   }
 
   bool get _isValid {
@@ -111,7 +147,7 @@ class _MentorSignupScreenState extends ConsumerState<MentorSignupScreen> {
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white),
-          onPressed: () => context.pop(),
+          onPressed: () => context.canPop() ? context.pop() : context.go(AppRoutes.roleSelect),
         ),
         title: Text(
           '멘토 가입',

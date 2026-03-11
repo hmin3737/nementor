@@ -10,7 +10,6 @@ class StudentShell extends StatelessWidget {
 
   final Widget child;
 
-
   @override
   Widget build(BuildContext context) {
     final location = GoRouterState.of(context).matchedLocation;
@@ -20,13 +19,13 @@ class StudentShell extends StatelessWidget {
       body: child,
       bottomNavigationBar: _StudentTabBar(currentIndex: currentIndex),
       floatingActionButton: _AskFAB(),
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
     );
   }
 
   int _indexFromLocation(String location) {
     if (location.startsWith('/student/explore')) return 1;
-    if (location.startsWith('/notification')) return 2;
+    if (location.startsWith('/student/board')) return 2;
     if (location.startsWith('/mypage')) return 3;
     return 0;
   }
@@ -71,15 +70,13 @@ class _StudentTabBar extends StatelessWidget {
                 currentIndex: currentIndex,
                 route: AppRoutes.exploreMentor,
               ),
-              // 가운데 빈 공간 (FAB 자리)
-              const Expanded(child: SizedBox()),
               _TabItem(
-                icon: Icons.notifications_outlined,
-                activeIcon: Icons.notifications,
-                label: AppStrings.tabNotification,
+                icon: Icons.article_outlined,
+                activeIcon: Icons.article,
+                label: '칼럼',
                 index: 2,
                 currentIndex: currentIndex,
-                route: AppRoutes.notification,
+                route: AppRoutes.studentBoard,
               ),
               _TabItem(
                 icon: Icons.person_outline,
@@ -117,8 +114,7 @@ class _TabItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isActive = index == currentIndex;
-    final color =
-        isActive ? AppColors.accent : AppColors.textDisabled;
+    final color = isActive ? AppColors.accent : AppColors.textDisabled;
 
     return Expanded(
       child: GestureDetector(
@@ -134,8 +130,7 @@ class _TabItem extends StatelessWidget {
               style: TextStyle(
                 fontSize: 10,
                 fontFamily: 'Pretendard',
-                fontWeight:
-                    isActive ? FontWeight.w600 : FontWeight.normal,
+                fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
                 color: color,
               ),
             ),
@@ -152,8 +147,8 @@ class _AskFAB extends StatelessWidget {
     return GestureDetector(
       onTap: () => context.push(AppRoutes.questionRegister),
       child: Container(
-        width: 60,
-        height: 60,
+        width: 56,
+        height: 56,
         decoration: BoxDecoration(
           gradient: AppColors.accentGradient,
           shape: BoxShape.circle,
@@ -165,7 +160,7 @@ class _AskFAB extends StatelessWidget {
             ),
           ],
         ),
-        child: const Icon(Icons.add, color: Colors.white, size: 28),
+        child: const Icon(Icons.add, color: Colors.white, size: 26),
       ),
     );
   }

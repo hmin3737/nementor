@@ -12,6 +12,8 @@ class UserModel extends Equatable {
     required this.role,
     required this.cashBalance,
     required this.createdAt,
+    this.mentorVerified,
+    this.avatarUrl,
   });
 
   final String id;
@@ -20,6 +22,8 @@ class UserModel extends Equatable {
   final UserRole role;
   final int cashBalance;
   final DateTime createdAt;
+  final bool? mentorVerified;
+  final String? avatarUrl;
 
   factory UserModel.fromJson(Map<String, dynamic> json) => UserModel(
         id: json['id'] as String,
@@ -31,6 +35,10 @@ class UserModel extends Equatable {
         ),
         cashBalance: json['cash_balance'] as int? ?? 0,
         createdAt: DateTime.parse(json['created_at'] as String),
+        mentorVerified:
+            (json['mentor_profiles'] as Map<String, dynamic>?)?['verified']
+                as bool?,
+        avatarUrl: json['avatar_url'] as String?,
       );
 
   Map<String, dynamic> toJson() => {
@@ -49,6 +57,8 @@ class UserModel extends Equatable {
     UserRole? role,
     int? cashBalance,
     DateTime? createdAt,
+    bool? mentorVerified,
+    String? avatarUrl,
   }) =>
       UserModel(
         id: id ?? this.id,
@@ -57,10 +67,13 @@ class UserModel extends Equatable {
         role: role ?? this.role,
         cashBalance: cashBalance ?? this.cashBalance,
         createdAt: createdAt ?? this.createdAt,
+        mentorVerified: mentorVerified ?? this.mentorVerified,
+        avatarUrl: avatarUrl ?? this.avatarUrl,
       );
 
   @override
-  List<Object?> get props => [id, email, nickname, role, cashBalance, createdAt];
+  List<Object?> get props =>
+      [id, email, nickname, role, cashBalance, createdAt, mentorVerified, avatarUrl];
 }
 
 class MentorProfile extends Equatable {
@@ -80,6 +93,7 @@ class MentorProfile extends Equatable {
     required this.rating,
     required this.reviewCount,
     this.certifications = const [],
+    this.verifiedFields = const [],
   });
 
   final String userId;
@@ -97,6 +111,7 @@ class MentorProfile extends Equatable {
   final double rating;
   final int reviewCount;
   final List<MentorCertification> certifications;
+  final List<String> verifiedFields;
 
   factory MentorProfile.fromJson(Map<String, dynamic> json) => MentorProfile(
         userId: json['user_id'] as String,
@@ -119,6 +134,10 @@ class MentorProfile extends Equatable {
         certifications: (json['mentor_certifications'] as List<dynamic>?)
                 ?.map((e) =>
                     MentorCertification.fromJson(e as Map<String, dynamic>))
+                .toList() ??
+            [],
+        verifiedFields: (json['verified_fields'] as List<dynamic>?)
+                ?.map((e) => e as String)
                 .toList() ??
             [],
       );

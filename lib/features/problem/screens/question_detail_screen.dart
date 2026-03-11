@@ -7,6 +7,7 @@ import '../../../core/app_spacing.dart';
 import '../../../core/app_strings.dart';
 import '../../../core/app_typography.dart';
 import '../../../shared/models/question_model.dart';
+import '../../../shared/services/supabase_service.dart';
 import '../../../shared/widgets/app_button.dart';
 import '../../../shared/widgets/app_toast.dart';
 import '../../../shared/widgets/shimmer_box.dart';
@@ -34,7 +35,8 @@ class QuestionDetailScreen extends ConsumerWidget {
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new, color: AppColors.primary),
-          onPressed: () => context.pop(),
+          onPressed: () =>
+              context.canPop() ? context.pop() : context.go('/student/feed'),
         ),
         title: Text('질문 상세', style: AppTypography.title3),
         centerTitle: true,
@@ -177,21 +179,75 @@ class QuestionDetailScreen extends ConsumerWidget {
                 isMyQuestion: isMyQuestion,
                 onPreempt: () async {
                   if (user == null) return;
-                  await ref
+                  final roomId = await ref
                       .read(questionSubmitProvider.notifier)
                       .preempt(q.id, user.id);
                   if (!context.mounted) return;
-                  final err = ref.read(questionSubmitProvider).error;
-                  if (err != null) {
+                  if (roomId == null) {
                     showAppToast(context, AppStrings.alreadyPreempted,
                         type: ToastType.error);
                   } else {
-                    showAppToast(context, AppStrings.preemptSuccess,
-                        type: ToastType.success);
-                    ref.invalidate(questionDetailProvider(questionId));
+                    // 학생에게 알림 전송
+                    await SupabaseService.client
+                        .from(SupabaseService.notificationsTable)
+                        .insert({
+                      'user_id': q.studentId,
+                      'type': 'question',
+                      'title': '멘토가 질문을 선점했어요',
+                      'body': '답변이 시작됐어요. 채팅방에서 확인하세요.',
+                      'ref_id': q.id,
+                    });
+                    if (!context.mounted) return;
+                    context.push('/chat/$roomId');
                   }
                 },
-                onOpenChat: () => context.push('/chat/${q.id}'),
+                onOpenChat: () async {
+                  final roomId = await ref
+                      .read(chatRoomIdProvider(q.id).future);
+                  if (!context.mounted) return;
+                  if (roomId != null) {
+                    context.push('/chat/$roomId');
+                  } else {
+                    showAppToast(context, '채팅방을 찾을 수 없어요',
+                        type: ToastType.error);
+                  }
+                },
+                onCancel: () async {
+                  final confirmed = await showDialog<bool>(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      title: const Text('질문 취소'),
+                      content: const Text('질문을 취소하면 캐시가 환불됩니다. 취소할까요?'),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx, false),
+                          child: const Text('아니오'),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx, true),
+                          child: Text('취소하기',
+                              style: TextStyle(color: AppColors.error)),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (confirmed != true || !context.mounted) return;
+                  final ok = await ref
+                      .read(questionSubmitProvider.notifier)
+                      .cancel(q.id);
+                  if (!context.mounted) return;
+                  if (ok) {
+                    showAppToast(context, '질문이 취소됐어요. 캐시가 환불됩니다.',
+                        type: ToastType.success);
+                    ref.invalidate(currentUserProvider);
+                    context.canPop()
+                        ? context.pop()
+                        : context.go('/student/feed');
+                  } else {
+                    showAppToast(context, AppStrings.serverError,
+                        type: ToastType.error);
+                  }
+                },
               ),
             ],
           );
@@ -271,12 +327,14 @@ class _BottomAction extends StatelessWidget {
     required this.isMyQuestion,
     required this.onPreempt,
     required this.onOpenChat,
+    required this.onCancel,
   });
   final QuestionModel question;
   final bool isMentor;
   final bool isMyQuestion;
   final VoidCallback onPreempt;
   final VoidCallback onOpenChat;
+  final VoidCallback onCancel;
 
   @override
   Widget build(BuildContext context) {
@@ -289,22 +347,25 @@ class _BottomAction extends StatelessWidget {
       ),
       child: () {
         if (question.status == QuestionStatus.open && isMentor) {
+          return AppButton(label: AppStrings.preempt, onPressed: onPreempt);
+        }
+        if (question.status == QuestionStatus.open && isMyQuestion) {
           return AppButton(
-            label: AppStrings.preempt,
-            onPressed: onPreempt,
+            label: '질문 취소 (캐시 환불)',
+            onPressed: onCancel,
+            variant: AppButtonVariant.danger,
           );
         }
         if (question.status == QuestionStatus.accepted &&
             (isMyQuestion || isMentor)) {
-          return AppButton(
-            label: '채팅방 열기',
-            onPressed: onOpenChat,
-          );
+          return AppButton(label: '채팅방 열기', onPressed: onOpenChat);
         }
         if (question.isClosed) {
+          if (isMyQuestion || isMentor) {
+            return AppButton(label: '채팅 내역 보기', onPressed: onOpenChat);
+          }
           return Text(AppStrings.endConfirmed,
-              style: AppTypography.callout
-                  .copyWith(color: AppColors.textSub),
+              style: AppTypography.callout.copyWith(color: AppColors.textSub),
               textAlign: TextAlign.center);
         }
         return const SizedBox.shrink();

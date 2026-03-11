@@ -111,8 +111,8 @@ abstract final class AppStrings {
   static const String chatRoom = '채팅';
   static const String declareEnd = '종료 선언';
   static const String declareEndConfirm = '답변을 종료하시겠어요?';
-  static const String declareEndDesc = '종료를 선언하면 24시간 후 자동 종료됩니다.\n이의가 있으면 분쟁 신청이 가능합니다.';
-  static const String endDeclared = '종료를 선언했습니다.\n24시간 후 자동 종료됩니다.';
+  static const String declareEndDesc = '종료하면 즉시 답변이 마감됩니다.\n이의가 있으면 분쟁 신청이 가능합니다.';
+  static const String endDeclared = '답변이 종료되었습니다.';
   static const String endConfirmed = '답변이 종료되었습니다.';
   static const String raiseDispute = '이의 신청';
   static const String inputMessage = '메시지를 입력하세요';
@@ -230,8 +230,39 @@ abstract final class AppStrings {
   static const String today = '오늘';
   static const String yesterday = '어제';
 
-  // ── 과목 목록 (22개 내멘토 인증 과목) ─────────────────────────
+  // ── 과목 목록 ─────────────────────────────────────────────────
   static const List<String> certSubjects = [
+    '초중등국어',
+    '초중등영어',
+    '초중등수학',
+    '초중등과학',
+    '초중등사회',
+    '고등국어',
+    '고등수학(미적분)',
+    '고등수학(확률과통계)',
+    '고등수학(기하)',
+    '고등영어',
+    '생활과윤리',
+    '윤리와사상',
+    '한국지리',
+    '세계지리',
+    '동아시아사',
+    '세계사',
+    '정치와법',
+    '사회문화',
+    '경제',
+    '물리학I',
+    '물리학II',
+    '화학I',
+    '화학II',
+    '생명과학I',
+    '생명과학II',
+    '지구과학I',
+    '지구과학II',
+  ];
+
+  /// PRO/MASTER 인증이 부여되는 과목 (초중등 5과목 제외) — 질문 필터 드롭다운에 사용
+  static const List<String> certSubjectsForFilter = [
     '고등국어',
     '고등수학(미적분)',
     '고등수학(확률과통계)',

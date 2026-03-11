@@ -1,6 +1,8 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 import '../../../core/app_colors.dart';
 import '../../../core/app_spacing.dart';
 import '../../../core/app_strings.dart';
@@ -26,6 +28,9 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
   final _highSchoolCtrl = TextEditingController();
   bool _saving = false;
   bool _initialized = false;
+  String? _avatarUrl;
+  File? _newAvatarFile;
+  final _picker = ImagePicker();
 
   @override
   void dispose() {
@@ -38,6 +43,36 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
     super.dispose();
   }
 
+  Future<void> _initMentorProfile(String userId) async {
+    try {
+      final data = await SupabaseService.client
+          .from(SupabaseService.mentorProfilesTable)
+          .select()
+          .eq('user_id', userId)
+          .maybeSingle();
+      if (data != null && mounted) {
+        setState(() {
+          _introCtrl.text = data['intro'] as String? ?? '';
+          _bioCtrl.text = data['bio'] as String? ?? '';
+          _universityCtrl.text = data['university'] as String? ?? '';
+          _departmentCtrl.text = data['department'] as String? ?? '';
+          _highSchoolCtrl.text = data['high_school'] as String? ?? '';
+        });
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _pickAvatar() async {
+    final file = await _picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 85,
+      maxWidth: 512,
+      maxHeight: 512,
+    );
+    if (file == null || !mounted) return;
+    setState(() => _newAvatarFile = File(file.path));
+  }
+
   Future<void> _save() async {
     final nick = _nicknameCtrl.text.trim();
     if (nick.length < 2) {
@@ -45,42 +80,73 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
       return;
     }
     setState(() => _saving = true);
-    try {
-      final user = ref.read(currentUserProvider).valueOrNull;
-      if (user == null) return;
 
+    final user = ref.read(currentUserProvider).valueOrNull;
+    if (user == null) {
+      if (mounted) setState(() => _saving = false);
+      return;
+    }
+
+    bool hasError = false;
+
+    // ① 아바타 업로드 + users 업데이트
+    try {
+      String? uploadedAvatarUrl;
+      if (_newAvatarFile != null) {
+        final ts = DateTime.now().millisecondsSinceEpoch;
+        final path = '${user.id}/avatar_$ts.jpg';
+        await SupabaseService.client.storage
+            .from(SupabaseService.avatarsBucket)
+            .upload(path, _newAvatarFile!);
+        uploadedAvatarUrl = SupabaseService.client.storage
+            .from(SupabaseService.avatarsBucket)
+            .getPublicUrl(path);
+      }
       await SupabaseService.client
           .from(SupabaseService.usersTable)
-          .update({'nickname': nick})
-          .eq('id', user.id);
+          .update({
+        'nickname': nick,
+        if (uploadedAvatarUrl != null) 'avatar_url': uploadedAvatarUrl,
+      }).eq('id', user.id);
+    } catch (e) {
+      hasError = true;
+    }
 
-      // 멘토 프로필 업데이트
-      if (user.role.name == 'mentor') {
+    // ② 멘토 프로필 업데이트 (users 실패와 무관하게 독립 실행)
+    if (user.role.name == 'mentor') {
+      try {
         await SupabaseService.client
             .from(SupabaseService.mentorProfilesTable)
             .update({
-          if (_introCtrl.text.trim().isNotEmpty)
-            'intro': _introCtrl.text.trim(),
-          if (_bioCtrl.text.trim().isNotEmpty) 'bio': _bioCtrl.text.trim(),
-          if (_universityCtrl.text.trim().isNotEmpty)
-            'university': _universityCtrl.text.trim(),
-          if (_departmentCtrl.text.trim().isNotEmpty)
-            'department': _departmentCtrl.text.trim(),
-          if (_highSchoolCtrl.text.trim().isNotEmpty)
-            'high_school': _highSchoolCtrl.text.trim(),
+          'intro': _introCtrl.text.trim().isEmpty
+              ? null
+              : _introCtrl.text.trim(),
+          'bio': _bioCtrl.text.trim().isEmpty ? null : _bioCtrl.text.trim(),
+          'university': _universityCtrl.text.trim().isEmpty
+              ? null
+              : _universityCtrl.text.trim(),
+          'department': _departmentCtrl.text.trim().isEmpty
+              ? null
+              : _departmentCtrl.text.trim(),
+          'high_school': _highSchoolCtrl.text.trim().isEmpty
+              ? null
+              : _highSchoolCtrl.text.trim(),
         }).eq('user_id', user.id);
+      } catch (e) {
+        hasError = true;
       }
+    }
 
-      if (mounted) {
+    ref.invalidate(currentUserProvider);
+
+    if (mounted) {
+      if (hasError) {
+        showAppToast(context, AppStrings.serverError, type: ToastType.error);
+      } else {
         showAppToast(context, '프로필이 저장되었어요', type: ToastType.success);
         context.pop();
       }
-    } catch (e) {
-      if (mounted) {
-        showAppToast(context, AppStrings.serverError, type: ToastType.error);
-      }
-    } finally {
-      if (mounted) setState(() => _saving = false);
+      setState(() => _saving = false);
     }
   }
 
@@ -91,8 +157,31 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
 
     if (!_initialized && user != null) {
       _nicknameCtrl.text = user.nickname;
+      _avatarUrl = user.avatarUrl;
       _initialized = true;
+      if (isMentor) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _initMentorProfile(user.id);
+        });
+      }
     }
+
+    final avatarWidget = _newAvatarFile != null
+        ? CircleAvatar(
+            radius: AppSpacing.avatarLg / 2,
+            backgroundImage: FileImage(_newAvatarFile!),
+          )
+        : (_avatarUrl != null && _avatarUrl!.isNotEmpty
+            ? CircleAvatar(
+                radius: AppSpacing.avatarLg / 2,
+                backgroundImage: NetworkImage(_avatarUrl!),
+              )
+            : const CircleAvatar(
+                radius: AppSpacing.avatarLg / 2,
+                backgroundColor: AppColors.border,
+                child:
+                    Icon(Icons.person, size: 36, color: AppColors.textSub),
+              ));
 
     return Scaffold(
       backgroundColor: AppColors.surface,
@@ -100,7 +189,8 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
         backgroundColor: AppColors.card,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, color: AppColors.textPrimary),
+          icon: const Icon(Icons.arrow_back_ios_new,
+              color: AppColors.textPrimary),
           onPressed: () => context.pop(),
         ),
         title: Text(AppStrings.editProfile, style: AppTypography.title3),
@@ -119,28 +209,27 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
             children: [
               // 아바타
               Center(
-                child: Stack(
-                  children: [
-                    const CircleAvatar(
-                      radius: AppSpacing.avatarLg / 2,
-                      backgroundColor: AppColors.border,
-                      child: Icon(Icons.person, size: 36, color: AppColors.textSub),
-                    ),
-                    Positioned(
-                      right: 0,
-                      bottom: 0,
-                      child: Container(
-                        width: 28,
-                        height: 28,
-                        decoration: const BoxDecoration(
-                          color: AppColors.accent,
-                          shape: BoxShape.circle,
+                child: GestureDetector(
+                  onTap: _pickAvatar,
+                  child: Stack(
+                    children: [
+                      avatarWidget,
+                      Positioned(
+                        right: 0,
+                        bottom: 0,
+                        child: Container(
+                          width: 28,
+                          height: 28,
+                          decoration: const BoxDecoration(
+                            color: AppColors.accent,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.camera_alt,
+                              color: Colors.white, size: 16),
                         ),
-                        child: const Icon(Icons.camera_alt,
-                            color: Colors.white, size: 16),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
               const SizedBox(height: AppSpacing.xl),
@@ -230,7 +319,8 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
       decoration: InputDecoration(
         counterText: '',
         hintText: hint,
-        hintStyle: AppTypography.callout.copyWith(color: AppColors.textDisabled),
+        hintStyle:
+            AppTypography.callout.copyWith(color: AppColors.textDisabled),
         filled: true,
         fillColor: AppColors.card,
         contentPadding: const EdgeInsets.symmetric(

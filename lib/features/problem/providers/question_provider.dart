@@ -24,7 +24,6 @@ final mentorFeedProvider =
   final user = await ref.watch(currentUserProvider.future);
   if (user == null) return [];
 
-  // filter_type='all' 또는 자신에게 허용된 질문
   final data = await _client
       .from(SupabaseService.questionsTable)
       .select('*, question_filters(*)')
@@ -32,7 +31,63 @@ final mentorFeedProvider =
       .order('created_at', ascending: false)
       .limit(50);
 
-  return (data as List).map((e) => QuestionModel.fromJson(e)).toList();
+  final questions =
+      (data as List).map((e) => QuestionModel.fromJson(e)).toList();
+
+  // 필터가 없는 질문만 있으면 바로 반환
+  if (!questions.any((q) => q.filter != null && q.filter!.isFiltered)) {
+    return questions;
+  }
+
+  // 멘토의 인증 목록 조회
+  final certsData = await _client
+      .from(SupabaseService.mentorCertificationsTable)
+      .select()
+      .eq('mentor_id', user.id);
+  final myCerts = (certsData as List).cast<Map<String, dynamic>>();
+
+  // 멘토의 대학교 조회
+  final profileData = await _client
+      .from(SupabaseService.mentorProfilesTable)
+      .select('university')
+      .eq('user_id', user.id)
+      .maybeSingle();
+  final myUniversity = profileData?['university'] as String?;
+
+  return questions.where((q) {
+    final filter = q.filter;
+    if (filter == null || !filter.isFiltered) return true;
+
+    if (filter.filterType == MentorFilterType.specific) {
+      return filter.allowedMentorIds.contains(user.id);
+    }
+
+    if (filter.filterType == MentorFilterType.condition) {
+      // 대학교 조건 체크
+      if (filter.requireUniversity != null &&
+          filter.requireUniversity!.isNotEmpty) {
+        if (myUniversity == null ||
+            !myUniversity
+                .toLowerCase()
+                .contains(filter.requireUniversity!.toLowerCase())) {
+          return false;
+        }
+      }
+      // 인증 조건 체크
+      for (final condition in filter.certConditions) {
+        final matching =
+            myCerts.where((c) => c['subject'] == condition.subject).toList();
+        if (matching.isEmpty) return false;
+        if (condition.minLevel == CertFilterLevel.masterOnly) {
+          if (!matching.any((c) => c['level'] == 'master')) return false;
+        }
+        // proOrAbove: pro 또는 master 모두 허용
+      }
+      return true;
+    }
+
+    return true;
+  }).toList();
 });
 
 // ── 오픈 피드 (학생 화면) ─────────────────────────────────────────
@@ -45,6 +100,17 @@ final studentFeedProvider =
       .order('created_at', ascending: false)
       .limit(50);
   return (data as List).map((e) => QuestionModel.fromJson(e)).toList();
+});
+
+// ── 질문의 채팅방 ID 조회 ─────────────────────────────────────────
+final chatRoomIdProvider =
+    FutureProvider.autoDispose.family<String?, String>((ref, questionId) async {
+  final data = await _client
+      .from(SupabaseService.chatRoomsTable)
+      .select('id')
+      .eq('question_id', questionId)
+      .maybeSingle();
+  return data?['id'] as String?;
 });
 
 // ── 질문 상세 ─────────────────────────────────────────────────────
@@ -81,6 +147,7 @@ class QuestionRegisterState {
     this.price = 3000,
     this.filterType = MentorFilterType.all,
     this.allowedMentorIds = const [],
+    this.allowedMentorNames = const [],
     this.certConditions = const [],
     this.requireUniversity,
   });
@@ -93,6 +160,7 @@ class QuestionRegisterState {
   final int price;
   final MentorFilterType filterType;
   final List<String> allowedMentorIds;
+  final List<String> allowedMentorNames; // 표시용 닉네임 (IDs와 1:1 대응)
   final List<CertCondition> certConditions;
   final String? requireUniversity;
 
@@ -105,6 +173,7 @@ class QuestionRegisterState {
     int? price,
     MentorFilterType? filterType,
     List<String>? allowedMentorIds,
+    List<String>? allowedMentorNames,
     List<CertCondition>? certConditions,
     String? requireUniversity,
     bool clearSchoolLevel = false,
@@ -119,6 +188,7 @@ class QuestionRegisterState {
         price: price ?? this.price,
         filterType: filterType ?? this.filterType,
         allowedMentorIds: allowedMentorIds ?? this.allowedMentorIds,
+        allowedMentorNames: allowedMentorNames ?? this.allowedMentorNames,
         certConditions: certConditions ?? this.certConditions,
         requireUniversity: requireUniversity ?? this.requireUniversity,
       );
@@ -145,6 +215,10 @@ class QuestionRegisterNotifier extends Notifier<QuestionRegisterState> {
   void setFilterType(MentorFilterType t) =>
       state = state.copyWith(filterType: t);
 
+  void setAllowedMentors(List<String> ids, List<String> names) =>
+      state = state.copyWith(
+          allowedMentorIds: ids, allowedMentorNames: names);
+
   void addCertCondition(CertCondition c) =>
       state = state.copyWith(certConditions: [...state.certConditions, c]);
 
@@ -155,6 +229,14 @@ class QuestionRegisterNotifier extends Notifier<QuestionRegisterState> {
 
   void setRequireUniversity(String? v) =>
       state = state.copyWith(requireUniversity: v);
+
+  void addImageUrls(List<String> urls) =>
+      state = state.copyWith(imageUrls: [...state.imageUrls, ...urls]);
+
+  void removeImageUrl(int index) {
+    final list = [...state.imageUrls]..removeAt(index);
+    state = state.copyWith(imageUrls: list);
+  }
 
   void reset() => state = const QuestionRegisterState();
 }
@@ -215,11 +297,11 @@ class QuestionSubmitNotifier extends AsyncNotifier<void> {
         });
       }
 
-      // 3. 캐시 차감 (Edge Function 호출)
-      await SupabaseService.client.functions.invoke(
-        'deduct-cash',
-        body: {'question_id': qId, 'amount': form.price},
-      );
+      // 3. 캐시 차감 (RPC 호출)
+      await _client.rpc('deduct_cash_for_question', params: {
+        'p_question_id': qId,
+        'p_amount': form.price,
+      });
 
       state = const AsyncData(null);
       return qId;
@@ -229,16 +311,45 @@ class QuestionSubmitNotifier extends AsyncNotifier<void> {
     }
   }
 
-  Future<void> preempt(String questionId, String mentorId) async {
+  Future<bool> cancel(String questionId) async {
     state = const AsyncLoading();
     try {
-      await _client.rpc('preempt_question', params: {
+      await _client.rpc('cancel_question', params: {'p_question_id': questionId});
+      state = const AsyncData(null);
+      return true;
+    } catch (e, st) {
+      state = AsyncError(e, st);
+      return false;
+    }
+  }
+
+  Future<bool> giveUp(String questionId, String mentorId) async {
+    state = const AsyncLoading();
+    try {
+      await _client.rpc('give_up_question', params: {
         'p_question_id': questionId,
         'p_mentor_id': mentorId,
       });
       state = const AsyncData(null);
+      return true;
     } catch (e, st) {
       state = AsyncError(e, st);
+      return false;
+    }
+  }
+
+  Future<String?> preempt(String questionId, String mentorId) async {
+    state = const AsyncLoading();
+    try {
+      final roomId = await _client.rpc('preempt_question', params: {
+        'p_question_id': questionId,
+        'p_mentor_id': mentorId,
+      }) as String?;
+      state = const AsyncData(null);
+      return roomId;
+    } catch (e, st) {
+      state = AsyncError(e, st);
+      return null;
     }
   }
 }

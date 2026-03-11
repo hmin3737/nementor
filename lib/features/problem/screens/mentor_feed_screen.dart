@@ -2,9 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/app_colors.dart';
+import '../../../core/app_router.dart';
 import '../../../core/app_spacing.dart';
 import '../../../core/app_strings.dart';
 import '../../../core/app_typography.dart';
+import '../../../shared/models/question_model.dart';
+import '../../../shared/services/supabase_service.dart';
 import '../../../shared/widgets/app_toast.dart';
 import '../../../shared/widgets/shimmer_box.dart';
 import '../../auth/providers/auth_provider.dart';
@@ -23,32 +26,36 @@ class MentorFeedScreen extends ConsumerStatefulWidget {
 class _MentorFeedScreenState extends ConsumerState<MentorFeedScreen> {
   _FeedSort _sort = _FeedSort.latest;
 
-  Future<void> _preempt(String questionId) async {
+  String _formatPrice(int price) => price
+      .toString()
+      .replaceAllMapped(
+          RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},');
+
+  Future<void> _preempt(QuestionModel question) async {
     final user = ref.read(currentUserProvider).valueOrNull;
     if (user == null) return;
 
+    final priceText = '₩${_formatPrice(question.price)}';
+    final desc = AppStrings.preemptConfirmDesc.replaceFirst('{0}', priceText);
+
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppSpacing.dialogRadius),
         ),
-        title: Text(AppStrings.preemptConfirm,
-            style: AppTypography.title3),
-        content: Text(
-          AppStrings.preemptConfirmDesc,
-          style: AppTypography.callout
-              .copyWith(color: AppColors.textSub),
-        ),
+        title: Text(AppStrings.preemptConfirm, style: AppTypography.title3),
+        content: Text(desc,
+            style: AppTypography.callout.copyWith(color: AppColors.textSub)),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () => Navigator.pop(ctx, false),
             child: Text(AppStrings.cancel,
                 style: AppTypography.subhead
                     .copyWith(color: AppColors.textSub)),
           ),
           TextButton(
-            onPressed: () => Navigator.pop(context, true),
+            onPressed: () => Navigator.pop(ctx, true),
             child: Text(AppStrings.preempt,
                 style: AppTypography.subhead
                     .copyWith(color: AppColors.accent)),
@@ -59,19 +66,27 @@ class _MentorFeedScreenState extends ConsumerState<MentorFeedScreen> {
 
     if (confirmed != true || !mounted) return;
 
-    await ref
+    final roomId = await ref
         .read(questionSubmitProvider.notifier)
-        .preempt(questionId, user.id);
+        .preempt(question.id, user.id);
 
     if (!mounted) return;
-    final err = ref.read(questionSubmitProvider).error;
-    if (err != null) {
+    if (roomId == null) {
       showAppToast(context, AppStrings.alreadyPreempted,
           type: ToastType.error);
     } else {
-      showAppToast(context, AppStrings.preemptSuccess,
-          type: ToastType.success);
+      // 학생에게 알림 전송
+      await SupabaseService.client
+          .from(SupabaseService.notificationsTable)
+          .insert({
+        'user_id': question.studentId,
+        'type': 'question',
+        'title': '멘토가 질문을 선점했어요',
+        'body': '답변이 시작됐어요. 채팅방에서 확인하세요.',
+        'ref_id': question.id,
+      });
       ref.invalidate(mentorFeedProvider);
+      context.push('/chat/$roomId');
     }
   }
 
@@ -92,6 +107,13 @@ class _MentorFeedScreenState extends ConsumerState<MentorFeedScreen> {
               style:
                   AppTypography.title2.copyWith(color: AppColors.primary),
             ),
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.notifications_outlined,
+                    color: AppColors.textPrimary),
+                onPressed: () => context.push(AppRoutes.notification),
+              ),
+            ],
             bottom: PreferredSize(
               preferredSize: const Size.fromHeight(48),
               child: _SortBar(
@@ -156,7 +178,7 @@ class _MentorFeedScreenState extends ConsumerState<MentorFeedScreen> {
                     onTap: () =>
                         context.push('/student/question/${sorted[i].id}'),
                     showPreemptButton: true,
-                    onPreempt: () => _preempt(sorted[i].id),
+                    onPreempt: () => _preempt(sorted[i]),
                   ),
                   childCount: sorted.length,
                 ),

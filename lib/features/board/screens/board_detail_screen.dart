@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter_quill/flutter_quill.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/app_colors.dart';
@@ -67,7 +69,7 @@ class _BoardDetailScreenState extends ConsumerState<BoardDetailScreen> {
   Future<void> _delete() async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppSpacing.dialogRadius)),
         title: Text(AppStrings.deleteColumn, style: AppTypography.title3),
@@ -75,12 +77,12 @@ class _BoardDetailScreenState extends ConsumerState<BoardDetailScreen> {
             style: AppTypography.callout.copyWith(color: AppColors.textSub)),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () => Navigator.pop(ctx, false),
             child: Text(AppStrings.cancel,
                 style: AppTypography.subhead.copyWith(color: AppColors.textSub)),
           ),
           TextButton(
-            onPressed: () => Navigator.pop(context, true),
+            onPressed: () => Navigator.pop(ctx, true),
             child: Text(AppStrings.delete,
                 style: AppTypography.subhead.copyWith(color: AppColors.error)),
           ),
@@ -180,54 +182,56 @@ class _BoardDetailScreenState extends ConsumerState<BoardDetailScreen> {
                           Text(post.title, style: AppTypography.title2),
                           const SizedBox(height: AppSpacing.sm),
                           // 작성자
-                          Row(
-                            children: [
-                              const CircleAvatar(
-                                radius: 16,
-                                backgroundColor: AppColors.border,
-                                child: Icon(Icons.person,
-                                    size: 16, color: AppColors.textSub),
-                              ),
-                              const SizedBox(width: AppSpacing.sm),
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    children: [
-                                      Text(post.mentorNickname,
-                                          style: AppTypography.calloutBold),
-                                      if (post.mentorCertifications.isNotEmpty) ...{
-                                        const SizedBox(width: AppSpacing.xs),
-                                        CertBadge(
-                                          subject: post
-                                              .mentorCertifications.first.subject,
-                                          level:
-                                              post.mentorCertifications.first.level,
-                                          compact: true,
-                                        ),
-                                      },
-                                    ],
-                                  ),
-                                  if (post.mentorUniversity != null)
-                                    Text(post.mentorUniversity!,
-                                        style: AppTypography.caption
-                                            .copyWith(color: AppColors.textSub)),
-                                ],
-                              ),
-                              const Spacer(),
-                              Text(
-                                _formatDate(post.createdAt),
-                                style: AppTypography.caption
-                                    .copyWith(color: AppColors.textDisabled),
-                              ),
-                            ],
+                          GestureDetector(
+                            onTap: () => context.push('/mentor/${post.mentorId}'),
+                            child: Row(
+                              children: [
+                                const CircleAvatar(
+                                  radius: 16,
+                                  backgroundColor: AppColors.border,
+                                  child: Icon(Icons.person,
+                                      size: 16, color: AppColors.textSub),
+                                ),
+                                const SizedBox(width: AppSpacing.sm),
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(post.mentorNickname,
+                                            style: AppTypography.calloutBold),
+                                        if (post.mentorCertifications.isNotEmpty) ...{
+                                          const SizedBox(width: AppSpacing.xs),
+                                          CertBadge(
+                                            subject: post
+                                                .mentorCertifications.first.subject,
+                                            level:
+                                                post.mentorCertifications.first.level,
+                                            compact: true,
+                                          ),
+                                        },
+                                      ],
+                                    ),
+                                    if (post.mentorUniversity != null)
+                                      Text(post.mentorUniversity!,
+                                          style: AppTypography.caption
+                                              .copyWith(color: AppColors.textSub)),
+                                  ],
+                                ),
+                                const Spacer(),
+                                Text(
+                                  _formatDate(post.createdAt),
+                                  style: AppTypography.caption
+                                      .copyWith(color: AppColors.textDisabled),
+                                ),
+                              ],
+                            ),
                           ),
                           const SizedBox(height: AppSpacing.base),
                           const Divider(color: AppColors.border),
                           const SizedBox(height: AppSpacing.base),
-                          Text(post.body,
-                              style: AppTypography.callout
-                                  .copyWith(height: 1.7)),
+                          _QuillBodyViewer(body: post.body),
                           const SizedBox(height: AppSpacing.base),
                           // 좋아요
                           GestureDetector(
@@ -553,5 +557,73 @@ class _CommentRow extends StatelessWidget {
     if (diff.inHours < 1) return '${diff.inMinutes}분 전';
     if (diff.inDays < 1) return '${diff.inHours}시간 전';
     return '${diff.inDays}일 전';
+  }
+}
+
+/// Delta JSON 또는 plain text를 읽기 전용으로 렌더링
+class _QuillBodyViewer extends StatefulWidget {
+  const _QuillBodyViewer({required this.body});
+  final String body;
+
+  @override
+  State<_QuillBodyViewer> createState() => _QuillBodyViewerState();
+}
+
+class _QuillBodyViewerState extends State<_QuillBodyViewer> {
+  late QuillController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = _build(widget.body);
+  }
+
+  @override
+  void didUpdateWidget(_QuillBodyViewer old) {
+    super.didUpdateWidget(old);
+    if (old.body != widget.body) {
+      _ctrl.dispose();
+      _ctrl = _build(widget.body);
+    }
+  }
+
+  QuillController _build(String body) {
+    try {
+      final json = jsonDecode(body) as List;
+      return QuillController(
+        document: Document.fromJson(json),
+        selection: const TextSelection.collapsed(offset: 0),
+        readOnly: true,
+      );
+    } catch (_) {
+      final doc = Document();
+      if (body.isNotEmpty) doc.insert(0, body);
+      return QuillController(
+        document: doc,
+        selection: const TextSelection.collapsed(offset: 0),
+        readOnly: true,
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return QuillEditor.basic(
+      controller: _ctrl,
+      config: const QuillEditorConfig(
+        autoFocus: false,
+        expands: false,
+        scrollable: false,
+        showCursor: false,
+        padding: EdgeInsets.zero,
+        enableInteractiveSelection: false,
+      ),
+    );
   }
 }

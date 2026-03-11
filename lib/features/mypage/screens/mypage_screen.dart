@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../core/app_colors.dart';
 import '../../../core/app_router.dart';
 import '../../../core/app_spacing.dart';
@@ -24,6 +25,13 @@ class MypageScreen extends ConsumerWidget {
         elevation: 0,
         title: Text(AppStrings.mypageTitle, style: AppTypography.title3),
         centerTitle: true,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.notifications_outlined,
+                color: AppColors.textPrimary),
+            onPressed: () => context.push(AppRoutes.notification),
+          ),
+        ],
         bottom: const PreferredSize(
           preferredSize: Size.fromHeight(1),
           child: Divider(height: 1, color: AppColors.border),
@@ -105,12 +113,13 @@ class MypageScreen extends ConsumerWidget {
                       ],
                     ),
                   ),
-                  TextButton(
-                    onPressed: () => context.push(AppRoutes.charge),
-                    child: Text(AppStrings.chargeTitle,
-                        style: AppTypography.subhead
-                            .copyWith(color: AppColors.accent)),
-                  ),
+                  if (user?.role != UserRole.mentor)
+                    TextButton(
+                      onPressed: () => context.push(AppRoutes.charge),
+                      child: Text(AppStrings.chargeTitle,
+                          style: AppTypography.subhead
+                              .copyWith(color: AppColors.accent)),
+                    ),
                 ],
               ),
             ),
@@ -125,20 +134,41 @@ class MypageScreen extends ConsumerWidget {
                 _MenuItem(
                   icon: Icons.help_outline,
                   label: AppStrings.myQuestions,
-                  onTap: () {},
+                  onTap: () => context.push(AppRoutes.myQuestions),
+                ),
+                _MenuItem(
+                  icon: Icons.favorite_border,
+                  label: '관심 멘토',
+                  onTap: () => context.push(AppRoutes.favorites),
                 ),
               ],
               if (user?.role == UserRole.mentor) ...[
                 _MenuItem(
                   icon: Icons.check_circle_outline,
                   label: AppStrings.myAnswers,
-                  onTap: () {},
+                  onTap: () => context.push(AppRoutes.myAnswers),
                 ),
                 _MenuItem(
                   icon: Icons.account_balance_wallet_outlined,
                   label: AppStrings.myEarnings,
-                  onTap: () => context.push(AppRoutes.cash),
+                  onTap: () => context.push(AppRoutes.earnings),
                 ),
+                _MenuItem(
+                  icon: Icons.article_outlined,
+                  label: '내 칼럼 관리',
+                  onTap: () => context.push(AppRoutes.myColumns),
+                ),
+                _MenuItem(
+                  icon: Icons.verified_user_outlined,
+                  label: '내멘토 확인 정보 등재 요청',
+                  onTap: () => context.push(AppRoutes.infoVerifyRequest),
+                ),
+                if (user?.mentorVerified == true)
+                  _MenuItem(
+                    icon: Icons.workspace_premium_outlined,
+                    label: '내멘토 PRO/MASTER 인증 요청',
+                    onTap: () => context.push(AppRoutes.certRequest),
+                  ),
               ],
               _MenuItem(
                 icon: Icons.gavel_outlined,
@@ -156,17 +186,19 @@ class MypageScreen extends ConsumerWidget {
               _MenuItem(
                 icon: Icons.notifications_outlined,
                 label: AppStrings.notificationSettings,
-                onTap: () {},
+                onTap: () => _showNotificationSettingsDialog(context),
               ),
               _MenuItem(
                 icon: Icons.privacy_tip_outlined,
                 label: '개인정보 처리방침',
-                onTap: () {},
+                onTap: () => _launchUrl(
+                    context, 'https://nementor.com/privacy'),
               ),
               _MenuItem(
                 icon: Icons.description_outlined,
                 label: '이용약관',
-                onTap: () {},
+                onTap: () =>
+                    _launchUrl(context, 'https://nementor.com/terms'),
               ),
               _MenuItem(
                 icon: Icons.info_outline,
@@ -196,10 +228,42 @@ class MypageScreen extends ConsumerWidget {
     );
   }
 
+  void _showNotificationSettingsDialog(BuildContext context) {
+    showDialog<void>(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppSpacing.dialogRadius)),
+        title: Text('알림 설정', style: AppTypography.title3),
+        content: Text(
+          '기기의 설정 앱에서 "내멘토" 앱 알림을 켜거나 끌 수 있어요.',
+          style: AppTypography.callout.copyWith(color: AppColors.textSub),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx),
+            child: Text('확인',
+                style: AppTypography.subhead
+                    .copyWith(color: AppColors.accent)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _launchUrl(BuildContext context, String url) async {
+    final uri = Uri.parse(url);
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      if (context.mounted) {
+        showAppToast(context, '페이지를 열 수 없어요', type: ToastType.error);
+      }
+    }
+  }
+
   Future<void> _showLogoutDialog(BuildContext context, WidgetRef ref) async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (dialogCtx) => AlertDialog(
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppSpacing.dialogRadius)),
         title: Text(AppStrings.logout, style: AppTypography.title3),
@@ -207,12 +271,12 @@ class MypageScreen extends ConsumerWidget {
             style: AppTypography.callout.copyWith(color: AppColors.textSub)),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () => Navigator.pop(dialogCtx, false),
             child: Text(AppStrings.cancel,
                 style: AppTypography.subhead.copyWith(color: AppColors.textSub)),
           ),
           TextButton(
-            onPressed: () => Navigator.pop(context, true),
+            onPressed: () => Navigator.pop(dialogCtx, true),
             child: Text(AppStrings.logout,
                 style: AppTypography.subhead.copyWith(color: AppColors.error)),
           ),

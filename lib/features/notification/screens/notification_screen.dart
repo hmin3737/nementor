@@ -86,7 +86,7 @@ class NotificationScreen extends ConsumerWidget {
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new, color: AppColors.textPrimary),
-          onPressed: () => context.pop(),
+          onPressed: () => context.canPop() ? context.pop() : null,
         ),
         title: Text(AppStrings.tabNotification, style: AppTypography.title3),
         centerTitle: true,

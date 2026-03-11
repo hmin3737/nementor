@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/app_colors.dart';
+import '../../../core/app_router.dart';
 import '../../../core/app_spacing.dart';
 import '../../../core/app_strings.dart';
 import '../../../core/app_typography.dart';
@@ -29,6 +30,11 @@ class StudentFeedScreen extends ConsumerWidget {
               style: AppTypography.title2.copyWith(color: AppColors.primary),
             ),
             actions: [
+              IconButton(
+                icon: const Icon(Icons.notifications_outlined,
+                    color: AppColors.primary),
+                onPressed: () => context.push(AppRoutes.notification),
+              ),
               IconButton(
                 icon: const Icon(Icons.search, color: AppColors.primary),
                 onPressed: () {},

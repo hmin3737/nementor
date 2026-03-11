@@ -7,6 +7,7 @@ import '../../../core/app_spacing.dart';
 import '../../../core/app_strings.dart';
 import '../../../core/app_typography.dart';
 import '../../../shared/models/cash_model.dart';
+import '../../../shared/models/user_model.dart';
 import '../../../shared/services/supabase_service.dart';
 import '../../../shared/widgets/app_button.dart';
 import '../../auth/providers/auth_provider.dart';
@@ -72,13 +73,15 @@ class CashScreen extends ConsumerWidget {
                   style: AppTypography.title1
                       .copyWith(color: Colors.white, fontWeight: FontWeight.w700),
                 ),
-                const SizedBox(height: AppSpacing.base),
-                AppButton(
-                  label: AppStrings.chargeTitle,
-                  variant: AppButtonVariant.secondary,
-                  height: 40,
-                  onPressed: () => context.push(AppRoutes.charge),
-                ),
+                if (user?.role != UserRole.mentor) ...[
+                  const SizedBox(height: AppSpacing.base),
+                  AppButton(
+                    label: AppStrings.chargeTitle,
+                    variant: AppButtonVariant.secondary,
+                    height: 40,
+                    onPressed: () => context.push(AppRoutes.charge),
+                  ),
+                ],
               ],
             ),
           ),

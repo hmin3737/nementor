@@ -24,8 +24,7 @@ class MentorShell extends StatelessWidget {
   int _indexFromLocation(String location) {
     if (location.startsWith('/board')) return 1;
     if (location.startsWith('/consulting')) return 2;
-    if (location.startsWith('/notification')) return 3;
-    if (location.startsWith('/mypage')) return 4;
+    if (location.startsWith('/mentor-mypage')) return 3;
     return 0;
   }
 }
@@ -52,19 +51,13 @@ class _MentorTabBar extends StatelessWidget {
       icon: Icons.chat_outlined,
       activeIcon: Icons.chat,
       label: AppStrings.tabConsulting,
-      route: '/consulting',
-    ),
-    _MentorTabItem(
-      icon: Icons.notifications_outlined,
-      activeIcon: Icons.notifications,
-      label: AppStrings.tabNotification,
-      route: AppRoutes.notification,
+      route: AppRoutes.consulting,
     ),
     _MentorTabItem(
       icon: Icons.person_outline,
       activeIcon: Icons.person,
       label: AppStrings.tabMypage,
-      route: AppRoutes.mypage,
+      route: AppRoutes.mentorMypage,
     ),
   ];
 

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/app_colors.dart';
+import '../../../core/app_router.dart';
 import '../../../core/app_spacing.dart';
 import '../../../core/app_strings.dart';
 import '../../../core/app_typography.dart';
@@ -9,13 +10,15 @@ import '../../../shared/models/user_model.dart';
 import '../../../shared/services/supabase_service.dart';
 import '../../../shared/widgets/cert_badge.dart';
 import '../../../shared/widgets/shimmer_box.dart';
+import '../../auth/providers/auth_provider.dart';
+import '../providers/favorites_provider.dart';
 
 final _mentorListProvider =
     FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) async {
   final data = await SupabaseService.client
       .from(SupabaseService.mentorProfilesTable)
-      .select('*, users!inner(nickname, email), mentor_certifications(*)')
-      .eq('users.role', 'mentor')
+      .select('*, users!inner(nickname, email, mentor_certifications(*))')
+      .eq('verified', true)
       .order('rating', ascending: false)
       .limit(30);
   return (data as List).cast<Map<String, dynamic>>();
@@ -32,6 +35,10 @@ class MentorExploreScreen extends ConsumerStatefulWidget {
 class _MentorExploreScreenState extends ConsumerState<MentorExploreScreen> {
   final _searchCtrl = TextEditingController();
   String _query = '';
+  bool _favoritesOnly = false;
+  final Set<String> _universityFilters = {};
+  final Set<String> _highSchoolFilters = {};
+  final Set<String> _middleSchoolFilters = {};
 
   @override
   void dispose() {
@@ -39,9 +46,162 @@ class _MentorExploreScreenState extends ConsumerState<MentorExploreScreen> {
     super.dispose();
   }
 
+  bool get _hasFilters =>
+      _universityFilters.isNotEmpty ||
+      _highSchoolFilters.isNotEmpty ||
+      _middleSchoolFilters.isNotEmpty;
+
+  bool _passesFilter(Map<String, dynamic> m) {
+    if (!_hasFilters) return true;
+    final uni = (m['university'] as String? ?? '').toLowerCase();
+    final high = (m['high_school'] as String? ?? '').toLowerCase();
+    final mid = (m['middle_school'] as String? ?? '').toLowerCase();
+
+    if (_universityFilters.isNotEmpty &&
+        !_universityFilters.any((f) => uni.contains(f.toLowerCase()))) {
+      return false;
+    }
+    if (_highSchoolFilters.isNotEmpty &&
+        !_highSchoolFilters.any((f) => high.contains(f.toLowerCase()))) {
+      return false;
+    }
+    if (_middleSchoolFilters.isNotEmpty &&
+        !_middleSchoolFilters.any((f) => mid.contains(f.toLowerCase()))) {
+      return false;
+    }
+    return true;
+  }
+
+  Future<void> _showAddFilterDialog(
+      String category, Set<String> targetSet) async {
+    final ctrl = TextEditingController();
+    final value = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppSpacing.dialogRadius)),
+        title: Text('$category 필터 추가', style: AppTypography.title3),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          style: AppTypography.callout,
+          decoration: InputDecoration(
+            hintText: '학교명을 입력하세요 (예: 서울대)',
+            hintStyle:
+                AppTypography.callout.copyWith(color: AppColors.textDisabled),
+            filled: true,
+            fillColor: AppColors.surface,
+            contentPadding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.base, vertical: AppSpacing.sm),
+            border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(AppSpacing.inputRadius),
+                borderSide: const BorderSide(color: AppColors.border)),
+            focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(AppSpacing.inputRadius),
+                borderSide:
+                    const BorderSide(color: AppColors.accent, width: 1.5)),
+          ),
+          onSubmitted: (v) {
+            if (v.trim().isNotEmpty) Navigator.pop(ctx, v.trim());
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(AppStrings.cancel,
+                style: AppTypography.subhead
+                    .copyWith(color: AppColors.textSub)),
+          ),
+          TextButton(
+            onPressed: () {
+              final v = ctrl.text.trim();
+              if (v.isNotEmpty) Navigator.pop(ctx, v);
+            },
+            child: Text('추가',
+                style: AppTypography.subhead
+                    .copyWith(color: AppColors.accent)),
+          ),
+        ],
+      ),
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) => ctrl.dispose());
+    if (value != null && value.isNotEmpty) {
+      setState(() => targetSet.add(value));
+    }
+  }
+
+  Widget _schoolFilterButton(
+      String label, Set<String> filters, VoidCallback onTap) {
+    final isActive = filters.isNotEmpty;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.sm, vertical: 6),
+        decoration: BoxDecoration(
+          color: isActive
+              ? AppColors.accent.withValues(alpha: 0.12)
+              : AppColors.card,
+          borderRadius: BorderRadius.circular(AppSpacing.chipRadius),
+          border: Border.all(
+              color: isActive ? AppColors.accent : AppColors.border),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(label,
+                style: AppTypography.caption.copyWith(
+                  color: isActive ? AppColors.accent : AppColors.textSub,
+                  fontWeight:
+                      isActive ? FontWeight.w600 : FontWeight.normal,
+                )),
+            const SizedBox(width: 3),
+            Icon(Icons.add,
+                size: 13,
+                color: isActive ? AppColors.accent : AppColors.textSub),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _activeChip(String label, VoidCallback onRemove) {
+    return Padding(
+      padding: const EdgeInsets.only(right: AppSpacing.xs),
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.sm, vertical: 4),
+        decoration: BoxDecoration(
+          color: AppColors.accent.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(AppSpacing.chipRadius),
+          border:
+              Border.all(color: AppColors.accent.withValues(alpha: 0.4)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(label,
+                style: AppTypography.caption
+                    .copyWith(color: AppColors.accent)),
+            const SizedBox(width: 3),
+            GestureDetector(
+              onTap: onRemove,
+              child: const Icon(Icons.close,
+                  size: 13, color: AppColors.accent),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final listAsync = ref.watch(_mentorListProvider);
+    final user = ref.watch(currentUserProvider).valueOrNull;
+    final isStudent = user?.role == UserRole.student;
+    final listAsync = (_favoritesOnly && isStudent)
+        ? ref.watch(favoriteMentorsProvider)
+        : ref.watch(_mentorListProvider);
 
     return Scaffold(
       backgroundColor: AppColors.surface,
@@ -54,44 +214,143 @@ class _MentorExploreScreenState extends ConsumerState<MentorExploreScreen> {
             title: Text(AppStrings.exploreMentor,
                 style:
                     AppTypography.title2.copyWith(color: AppColors.primary)),
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.notifications_outlined,
+                    color: AppColors.primary),
+                onPressed: () => context.push(AppRoutes.notification),
+              ),
+            ],
             bottom: PreferredSize(
-              preferredSize: const Size.fromHeight(56),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.base, 0, AppSpacing.base, AppSpacing.sm),
-                child: TextField(
-                  controller: _searchCtrl,
-                  onChanged: (v) => setState(() => _query = v.trim()),
-                  decoration: InputDecoration(
-                    hintText: '멘토 이름, 과목, 대학교 검색',
-                    hintStyle: AppTypography.callout
-                        .copyWith(color: AppColors.textDisabled),
-                    prefixIcon: const Icon(Icons.search,
-                        color: AppColors.textSub),
-                    filled: true,
-                    fillColor: AppColors.card,
-                    contentPadding: const EdgeInsets.symmetric(
-                        vertical: AppSpacing.sm),
-                    border: OutlineInputBorder(
-                      borderRadius:
-                          BorderRadius.circular(AppSpacing.inputRadius),
-                      borderSide:
-                          const BorderSide(color: AppColors.border),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius:
-                          BorderRadius.circular(AppSpacing.inputRadius),
-                      borderSide:
-                          const BorderSide(color: AppColors.border),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius:
-                          BorderRadius.circular(AppSpacing.inputRadius),
-                      borderSide: const BorderSide(
-                          color: AppColors.accent, width: 1.5),
+              preferredSize: Size.fromHeight(_hasFilters ? 140 : 104),
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                        AppSpacing.base, 0, AppSpacing.base, AppSpacing.xs),
+                    child: TextField(
+                      controller: _searchCtrl,
+                      onChanged: (v) => setState(() => _query = v.trim()),
+                      decoration: InputDecoration(
+                        hintText: '멘토 이름, 과목, 대학교 검색',
+                        hintStyle: AppTypography.callout
+                            .copyWith(color: AppColors.textDisabled),
+                        prefixIcon: const Icon(Icons.search,
+                            color: AppColors.textSub),
+                        filled: true,
+                        fillColor: AppColors.card,
+                        contentPadding: const EdgeInsets.symmetric(
+                            vertical: AppSpacing.sm),
+                        border: OutlineInputBorder(
+                          borderRadius:
+                              BorderRadius.circular(AppSpacing.inputRadius),
+                          borderSide:
+                              const BorderSide(color: AppColors.border),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius:
+                              BorderRadius.circular(AppSpacing.inputRadius),
+                          borderSide:
+                              const BorderSide(color: AppColors.border),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius:
+                              BorderRadius.circular(AppSpacing.inputRadius),
+                          borderSide: const BorderSide(
+                              color: AppColors.accent, width: 1.5),
+                        ),
+                      ),
                     ),
                   ),
-                ),
+                  // Filter chips row
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                        AppSpacing.base, 0, AppSpacing.base, AppSpacing.xs),
+                    child: Row(
+                      children: [
+                        if (isStudent) ...[
+                          GestureDetector(
+                            onTap: () => setState(() => _favoritesOnly = !_favoritesOnly),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 150),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: AppSpacing.sm, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: _favoritesOnly
+                                    ? AppColors.error.withValues(alpha: 0.12)
+                                    : AppColors.card,
+                                borderRadius: BorderRadius.circular(AppSpacing.chipRadius),
+                                border: Border.all(
+                                  color: _favoritesOnly
+                                      ? AppColors.error.withValues(alpha: 0.5)
+                                      : AppColors.border,
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    _favoritesOnly ? Icons.favorite : Icons.favorite_border,
+                                    size: 13,
+                                    color: _favoritesOnly ? AppColors.error : AppColors.textSub,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text('관심 멘토',
+                                      style: AppTypography.caption.copyWith(
+                                        color: _favoritesOnly ? AppColors.error : AppColors.textSub,
+                                        fontWeight: _favoritesOnly ? FontWeight.w600 : FontWeight.normal,
+                                      )),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: AppSpacing.xs),
+                        ],
+                        _schoolFilterButton(
+                          '대학교',
+                          _universityFilters,
+                          () => _showAddFilterDialog('대학교', _universityFilters),
+                        ),
+                        const SizedBox(width: AppSpacing.xs),
+                        _schoolFilterButton(
+                          '고등학교',
+                          _highSchoolFilters,
+                          () => _showAddFilterDialog('고등학교', _highSchoolFilters),
+                        ),
+                        const SizedBox(width: AppSpacing.xs),
+                        _schoolFilterButton(
+                          '중학교',
+                          _middleSchoolFilters,
+                          () => _showAddFilterDialog('중학교', _middleSchoolFilters),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Active filter chips
+                  if (_hasFilters)
+                    SizedBox(
+                      height: 36,
+                      child: ListView(
+                        scrollDirection: Axis.horizontal,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: AppSpacing.base),
+                        children: [
+                          ..._universityFilters.map((f) => _activeChip(
+                              '대학 $f',
+                              () => setState(
+                                  () => _universityFilters.remove(f)))),
+                          ..._highSchoolFilters.map((f) => _activeChip(
+                              '고등 $f',
+                              () => setState(
+                                  () => _highSchoolFilters.remove(f)))),
+                          ..._middleSchoolFilters.map((f) => _activeChip(
+                              '중학 $f',
+                              () => setState(
+                                  () => _middleSchoolFilters.remove(f)))),
+                        ],
+                      ),
+                    ),
+                ],
               ),
             ),
           ),
@@ -110,21 +369,21 @@ class _MentorExploreScreenState extends ConsumerState<MentorExploreScreen> {
               ),
             ),
             data: (mentors) {
-              final filtered = _query.isEmpty
-                  ? mentors
-                  : mentors.where((m) {
-                      final nick =
-                          (m['users']?['nickname'] as String? ?? '')
-                              .toLowerCase();
-                      final uni =
-                          (m['university'] as String? ?? '').toLowerCase();
-                      final dept =
-                          (m['department'] as String? ?? '').toLowerCase();
-                      final q = _query.toLowerCase();
-                      return nick.contains(q) ||
-                          uni.contains(q) ||
-                          dept.contains(q);
-                    }).toList();
+              final filtered = mentors.where((m) {
+                if (!_passesFilter(m)) return false;
+                if (_query.isEmpty) return true;
+                final nick =
+                    (m['users']?['nickname'] as String? ?? '')
+                        .toLowerCase();
+                final uni =
+                    (m['university'] as String? ?? '').toLowerCase();
+                final dept =
+                    (m['department'] as String? ?? '').toLowerCase();
+                final q = _query.toLowerCase();
+                return nick.contains(q) ||
+                    uni.contains(q) ||
+                    dept.contains(q);
+              }).toList();
 
               if (filtered.isEmpty) {
                 return SliverFillRemaining(
@@ -172,7 +431,7 @@ class _MentorCard extends StatelessWidget {
     final verified = data['verified'] as bool? ?? false;
     final hourlyRateMin = data['hourly_rate_min'] as int?;
     final hourlyRateMax = data['hourly_rate_max'] as int?;
-    final certs = (data['mentor_certifications'] as List<dynamic>?)
+    final certs = (data['users']?['mentor_certifications'] as List<dynamic>?)
         ?.map((e) =>
             MentorCertification.fromJson(e as Map<String, dynamic>))
         .toList() ??
@@ -241,6 +500,8 @@ class _MentorCard extends StatelessWidget {
                 if (rateDisplay.isNotEmpty)
                   Text(rateDisplay,
                       style: AppTypography.priceSmall),
+                MentorFavoriteButton(
+                    mentorId: data['user_id'] as String),
               ],
             ),
             if (certs.isNotEmpty) ...[

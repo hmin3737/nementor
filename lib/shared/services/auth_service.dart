@@ -19,13 +19,37 @@ class AuthService {
   }
 
   Future<UserModel?> getUserById(String id) async {
-    final data = await _client
-        .from(SupabaseService.usersTable)
-        .select()
-        .eq('id', id)
-        .maybeSingle();
-    if (data == null) return null;
-    return UserModel.fromJson(data);
+    try {
+      final data = await _client
+          .from(SupabaseService.usersTable)
+          .select()
+          .eq('id', id)
+          .maybeSingle();
+      if (data == null) {
+        // ignore: avoid_print
+        print('[AuthService] getUserById: no row found for id=$id');
+        return null;
+      }
+
+      // mentor인 경우에만 mentor_profiles 별도 조회 (RLS 격리)
+      Map<String, dynamic>? mentorProfile;
+      if (data['role'] == 'mentor') {
+        mentorProfile = await _client
+            .from(SupabaseService.mentorProfilesTable)
+            .select('verified')
+            .eq('user_id', id)
+            .maybeSingle();
+      }
+
+      final user = UserModel.fromJson({...data, 'mentor_profiles': mentorProfile});
+      // ignore: avoid_print
+      print('[AuthService] getUserById: role=${user.role}, id=$id');
+      return user;
+    } catch (e, st) {
+      // ignore: avoid_print
+      print('[AuthService] getUserById ERROR: $e\n$st');
+      rethrow;
+    }
   }
 
   // ── 카카오 로그인 ─────────────────────────────────────────────
@@ -33,6 +57,7 @@ class AuthService {
     await _client.auth.signInWithOAuth(
       OAuthProvider.kakao,
       redirectTo: 'io.nementor.app://login-callback',
+      authScreenLaunchMode: LaunchMode.externalApplication,
     );
   }
 
@@ -58,7 +83,19 @@ class AuthService {
 
   // ── 이메일 회원가입 ──────────────────────────────────────────
   Future<AuthResponse> signUpWithEmail(String email, String password) async {
-    return _client.auth.signUp(email: email, password: password);
+    return _client.auth.signUp(
+      email: email,
+      password: password,
+      emailRedirectTo: 'io.nementor.app://login-callback',
+    );
+  }
+
+  // ── 비밀번호 재설정 이메일 발송 ──────────────────────────────
+  Future<void> resetPasswordForEmail(String email) async {
+    await _client.auth.resetPasswordForEmail(
+      email,
+      redirectTo: 'io.nementor.app://login-callback',
+    );
   }
 
   // ── 회원가입 완료 (role + nickname 저장) ─────────────────────
@@ -66,7 +103,10 @@ class AuthService {
     required String nickname,
     required UserRole role,
   }) async {
-    final authUser = currentAuthUser!;
+    final authUser = currentAuthUser;
+    if (authUser == null) {
+      throw Exception('로그인 세션이 없습니다. 다시 로그인해 주세요.');
+    }
 
     // users 테이블에 삽입 (upsert: OAuth 재가입 대비)
     final data = await _client

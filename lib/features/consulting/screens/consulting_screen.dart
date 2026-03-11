@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/app_colors.dart';
+import '../../../core/app_router.dart';
 import '../../../core/app_spacing.dart';
 import '../../../core/app_strings.dart';
 import '../../../core/app_typography.dart';
@@ -106,6 +107,14 @@ class ConsultingScreen extends ConsumerWidget {
         elevation: 0,
         title: Text(AppStrings.tabConsulting, style: AppTypography.title3),
         centerTitle: true,
+        actions: [
+          if (isMentor)
+            IconButton(
+              icon: const Icon(Icons.notifications_outlined,
+                  color: AppColors.textPrimary),
+              onPressed: () => context.push(AppRoutes.notification),
+            ),
+        ],
         bottom: const PreferredSize(
           preferredSize: Size.fromHeight(1),
           child: Divider(height: 1, color: AppColors.border),

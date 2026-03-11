@@ -5,13 +5,19 @@ import '../../../shared/services/auth_service.dart';
 
 final authServiceProvider = Provider<AuthService>((ref) => AuthService());
 
-// 현재 로그인된 사용자 프로필
-final currentUserProvider = StreamProvider<UserModel?>((ref) {
-  final service = ref.watch(authServiceProvider);
-  return service.authStateChanges.asyncMap((state) async {
-    if (state.event == AuthChangeEvent.signedOut) return null;
-    return service.getCurrentUser();
-  });
+// Supabase 인증 이벤트 스트림 (내부용)
+final _authEventProvider = StreamProvider<AuthState>((ref) {
+  return ref.watch(authServiceProvider).authStateChanges;
+});
+
+// 현재 로그인된 사용자 프로필 (invalidate로 수동 갱신 가능)
+final currentUserProvider = FutureProvider<UserModel?>((ref) async {
+  final event = ref.watch(_authEventProvider).valueOrNull;
+  // signedOut 이벤트면 null 반환
+  if (event?.event == AuthChangeEvent.signedOut) return null;
+  final service = ref.read(authServiceProvider);
+  if (service.currentAuthUser == null) return null;
+  return service.getCurrentUser();
 });
 
 // 로그인 여부
@@ -68,15 +74,21 @@ class AuthNotifier extends AsyncNotifier<void> {
     required UserRole role,
   }) async {
     state = const AsyncLoading();
-    late UserModel user;
-    state = await AsyncValue.guard(() async {
-      user = await ref.read(authServiceProvider).completeSignUp(
-            nickname: nickname,
-            role: role,
-          );
-    });
-    state.hasError ? state : const AsyncData(null);
+    final user = await ref.read(authServiceProvider).completeSignUp(
+      nickname: nickname,
+      role: role,
+    );
+    state = const AsyncData(null);
+    // 라우터가 즉시 새 사용자를 인식하도록 강제 갱신
+    ref.invalidate(currentUserProvider);
     return user;
+  }
+
+  Future<void> resetPassword(String email) async {
+    state = const AsyncLoading();
+    state = await AsyncValue.guard(
+      () => ref.read(authServiceProvider).resetPasswordForEmail(email),
+    );
   }
 
   Future<void> signOut() async {

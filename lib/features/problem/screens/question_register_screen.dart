@@ -1,9 +1,14 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../../shared/services/supabase_service.dart';
 import '../../../core/app_colors.dart';
+import '../../mentor/providers/favorites_provider.dart';
 import '../../../core/app_spacing.dart';
 import '../../../core/app_strings.dart';
 import '../../../core/app_typography.dart';
@@ -29,6 +34,7 @@ class _QuestionRegisterScreenState
   final _priceCtrl = TextEditingController();
   final _uniCtrl = TextEditingController();
   final _picker = ImagePicker();
+  bool _isPicking = false;
 
   @override
   void initState() {
@@ -55,15 +61,40 @@ class _QuestionRegisterScreenState
   }
 
   Future<void> _pickImages() async {
-    final state = ref.read(questionRegisterProvider);
-    if (state.imageUrls.length >= 5) return;
-    final images = await _picker.pickMultiImage(limit: 5 - state.imageUrls.length);
-    if (images.isEmpty) return;
-    // TODO: upload to Supabase Storage and get URLs
-    // For now, store local paths for display
-    final paths = images.map((x) => x.path).toList();
-    ref.read(questionRegisterProvider.notifier).setBody(state.body);
-    showAppToast(context, '이미지 ${paths.length}장 추가됨', type: ToastType.info);
+    if (_isPicking) return;
+    _isPicking = true;
+    try {
+      final formState = ref.read(questionRegisterProvider);
+      if (formState.imageUrls.length >= 5) return;
+      final images = await _picker.pickMultiImage(
+          limit: 5 - formState.imageUrls.length);
+      if (!mounted || images.isEmpty) return;
+
+      final user = ref.read(currentUserProvider).valueOrNull;
+      if (user == null) return;
+
+      showAppToast(context, '이미지 업로드 중...', type: ToastType.info);
+      final storage = SupabaseService.client.storage.from(
+          SupabaseService.questionImagesBucket);
+      final urls = <String>[];
+      for (final img in images) {
+        final bytes = await File(img.path).readAsBytes();
+        final ext = img.path.split('.').last.toLowerCase();
+        final path =
+            '${user.id}/${DateTime.now().millisecondsSinceEpoch}_${urls.length}.$ext';
+        await storage.uploadBinary(path, bytes,
+            fileOptions: FileOptions(contentType: 'image/$ext'));
+        urls.add(storage.getPublicUrl(path));
+      }
+      if (!mounted) return;
+      ref.read(questionRegisterProvider.notifier).addImageUrls(urls);
+      showAppToast(context, '이미지 ${urls.length}장 추가됐어요', type: ToastType.success);
+    } catch (e) {
+      if (!mounted) return;
+      showAppToast(context, '이미지 업로드 실패: $e', type: ToastType.error);
+    } finally {
+      _isPicking = false;
+    }
   }
 
   Future<void> _submit() async {
@@ -87,11 +118,26 @@ class _QuestionRegisterScreenState
     if (!mounted) return;
     if (qId != null) {
       ref.read(questionRegisterProvider.notifier).reset();
+      ref.invalidate(currentUserProvider); // 캐시 차감 후 잔액 즉시 갱신
       showAppToast(context, '질문이 등록됐어요!', type: ToastType.success);
       context.go('/student/question/$qId');
     } else {
-      showAppToast(context, AppStrings.serverError, type: ToastType.error);
+      // Supabase RPC 에러 메시지 (캐시 부족 등) 우선 표시
+      final errState = ref.read(questionSubmitProvider);
+      final errMsg = errState is AsyncError
+          ? _extractErrorMessage(errState.error)
+          : AppStrings.serverError;
+      showAppToast(context, errMsg, type: ToastType.error);
     }
+  }
+
+  String _extractErrorMessage(Object? error) {
+    if (error == null) return AppStrings.serverError;
+    final msg = error.toString();
+    // Supabase RPC가 raise exception으로 던진 메시지 추출
+    final match = RegExp(r'message: (.+?)(?:,|\})').firstMatch(msg);
+    if (match != null) return match.group(1)!.trim();
+    return AppStrings.serverError;
   }
 
   void _showInsufficientCash() {
@@ -179,11 +225,11 @@ class _QuestionRegisterScreenState
                         bodyCtrl: _bodyCtrl,
                         onPickImages: _pickImages,
                       ),
-                    3 => _Step4Price(
+                    3 => _Step5Filter(state: state, uniCtrl: _uniCtrl),
+                    4 => _Step4Price(
                         state: state,
                         priceCtrl: _priceCtrl,
                       ),
-                    4 => _Step5Filter(state: state, uniCtrl: _uniCtrl),
                     5 => _Step6Confirm(state: state),
                     _ => const SizedBox(),
                   },
@@ -206,7 +252,7 @@ class _QuestionRegisterScreenState
   bool _canNext(QuestionRegisterState s) {
     return switch (_step) {
       2 => s.body.trim().isNotEmpty,
-      3 => s.price > 0,
+      4 => s.price > 0,
       _ => true,
     };
   }
@@ -452,7 +498,7 @@ class _Step4Price extends ConsumerWidget {
   }
 }
 
-// ── 스텝 5: 멘토 필터 ─────────────────────────────────────────────
+// ── 스텝 3(→4): 멘토 필터 ────────────────────────────────────────
 class _Step5Filter extends ConsumerWidget {
   const _Step5Filter({required this.state, required this.uniCtrl});
   final QuestionRegisterState state;
@@ -466,6 +512,7 @@ class _Step5Filter extends ConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // ─ 모든 멘토 ─
           _FilterOption(
             label: AppStrings.filterAll,
             desc: '모든 멘토가 답변할 수 있어요',
@@ -473,6 +520,60 @@ class _Step5Filter extends ConsumerWidget {
             onTap: () => n.setFilterType(MentorFilterType.all),
           ),
           const SizedBox(height: AppSpacing.sm),
+
+          // ─ 특정 멘토 선택 ─
+          _FilterOption(
+            label: AppStrings.filterSpecific,
+            desc: '관심 멘토 또는 탐색한 멘토 중 직접 선택',
+            selected: state.filterType == MentorFilterType.specific,
+            onTap: () => n.setFilterType(MentorFilterType.specific),
+          ),
+          if (state.filterType == MentorFilterType.specific) ...[
+            const SizedBox(height: AppSpacing.base),
+            // 선택된 멘토 칩
+            if (state.allowedMentorNames.isNotEmpty)
+              Wrap(
+                spacing: AppSpacing.xs,
+                runSpacing: AppSpacing.xs,
+                children: state.allowedMentorNames
+                    .asMap()
+                    .entries
+                    .map((e) => Chip(
+                          label: Text(e.value,
+                              style: AppTypography.footnote),
+                          deleteIcon: const Icon(Icons.close, size: 14),
+                          onDeleted: () {
+                            final ids = [...state.allowedMentorIds]
+                              ..removeAt(e.key);
+                            final names = [...state.allowedMentorNames]
+                              ..removeAt(e.key);
+                            n.setAllowedMentors(ids, names);
+                          },
+                          backgroundColor:
+                              AppColors.accent.withValues(alpha: 0.1),
+                        ))
+                    .toList(),
+              ),
+            const SizedBox(height: AppSpacing.sm),
+            OutlinedButton.icon(
+              onPressed: () => _showMentorPickerSheet(context, ref),
+              icon: const Icon(Icons.person_search_outlined, size: 18),
+              label: Text(state.allowedMentorIds.isEmpty
+                  ? '멘토 선택하기'
+                  : '멘토 추가하기'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.accent,
+                side: const BorderSide(color: AppColors.accent),
+                shape: RoundedRectangleBorder(
+                  borderRadius:
+                      BorderRadius.circular(AppSpacing.chipRadius),
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: AppSpacing.sm),
+
+          // ─ 조건 필터 ─
           _FilterOption(
             label: AppStrings.filterCondition,
             desc: '인증 조건을 충족하는 멘토만',
@@ -487,14 +588,15 @@ class _Step5Filter extends ConsumerWidget {
                         style: AppTypography.footnote),
                     deleteIcon: const Icon(Icons.close, size: 16),
                     onDeleted: () => n.removeCertCondition(e.key),
-                    backgroundColor: AppColors.accent.withValues(alpha: 0.1),
+                    backgroundColor:
+                        AppColors.accent.withValues(alpha: 0.1),
                   ),
                 ),
             const SizedBox(height: AppSpacing.sm),
             OutlinedButton.icon(
               onPressed: () => _showAddConditionSheet(context, ref),
               icon: const Icon(Icons.add, size: 18),
-              label: Text(AppStrings.addCertCondition),
+              label: const Text(AppStrings.addCertCondition),
               style: OutlinedButton.styleFrom(
                 foregroundColor: AppColors.accent,
                 side: const BorderSide(color: AppColors.accent),
@@ -520,7 +622,8 @@ class _Step5Filter extends ConsumerWidget {
                 filled: true,
                 fillColor: AppColors.card,
                 contentPadding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.base, vertical: AppSpacing.sm),
+                    horizontal: AppSpacing.base,
+                    vertical: AppSpacing.sm),
                 border: OutlineInputBorder(
                   borderRadius:
                       BorderRadius.circular(AppSpacing.inputRadius),
@@ -545,6 +648,24 @@ class _Step5Filter extends ConsumerWidget {
     );
   }
 
+  Future<void> _showMentorPickerSheet(
+      BuildContext context, WidgetRef ref) async {
+    final result = await showModalBottomSheet<
+        ({List<String> ids, List<String> names})>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _MentorPickerSheet(
+        alreadySelectedIds: state.allowedMentorIds,
+      ),
+    );
+    if (result != null) {
+      ref
+          .read(questionRegisterProvider.notifier)
+          .setAllowedMentors(result.ids, result.names);
+    }
+  }
+
   void _showAddConditionSheet(BuildContext context, WidgetRef ref) {
     String? selectedSubject;
     CertFilterLevel selectedLevel = CertFilterLevel.proOrAbove;
@@ -562,7 +683,8 @@ class _Step5Filter extends ConsumerWidget {
             left: AppSpacing.base,
             right: AppSpacing.base,
             top: AppSpacing.xl,
-            bottom: MediaQuery.of(ctx).viewInsets.bottom + AppSpacing.x2l,
+            bottom:
+                MediaQuery.of(ctx).viewInsets.bottom + AppSpacing.x2l,
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -588,7 +710,7 @@ class _Step5Filter extends ConsumerWidget {
                 hint: Text('과목을 선택하세요',
                     style: AppTypography.callout
                         .copyWith(color: AppColors.textDisabled)),
-                items: AppStrings.certSubjects
+                items: AppStrings.certSubjectsForFilter
                     .map((s) =>
                         DropdownMenuItem(value: s, child: Text(s)))
                     .toList(),
@@ -600,7 +722,8 @@ class _Step5Filter extends ConsumerWidget {
                   border: OutlineInputBorder(
                     borderRadius:
                         BorderRadius.circular(AppSpacing.inputRadius),
-                    borderSide: const BorderSide(color: AppColors.border),
+                    borderSide:
+                        const BorderSide(color: AppColors.border),
                   ),
                 ),
               ),
@@ -652,6 +775,433 @@ class _Step5Filter extends ConsumerWidget {
     );
   }
 }
+
+// ── 멘토 피커 시트 ────────────────────────────────────────────────
+class _MentorPickerSheet extends ConsumerStatefulWidget {
+  const _MentorPickerSheet({required this.alreadySelectedIds});
+  final List<String> alreadySelectedIds;
+
+  @override
+  ConsumerState<_MentorPickerSheet> createState() =>
+      _MentorPickerSheetState();
+}
+
+class _MentorPickerSheetState
+    extends ConsumerState<_MentorPickerSheet>
+    with SingleTickerProviderStateMixin {
+  late TabController _tabCtrl;
+  final _searchCtrl = TextEditingController();
+  String _query = '';
+  // 전체 멘토 탭 필터
+  CertFilterLevel? _certLevelFilter; // null=전체, proOrAbove, masterOnly
+  // id → nickname 선택 맵
+  late Map<String, String> _selected;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabCtrl = TabController(length: 2, vsync: this);
+    _selected = {};
+  }
+
+  @override
+  void dispose() {
+    _tabCtrl.dispose();
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  void _toggle(String id, String nickname) {
+    setState(() {
+      if (_selected.containsKey(id)) {
+        _selected.remove(id);
+      } else {
+        _selected[id] = nickname;
+      }
+    });
+  }
+
+  void _confirm() {
+    Navigator.pop(context, (
+      ids: _selected.keys.toList(),
+      names: _selected.values.toList(),
+    ));
+  }
+
+  Widget _mentorTile(Map<String, dynamic> m, {bool showCheckbox = true}) {
+    final id = m['user_id'] as String;
+    final nick = m['users']?['nickname'] as String? ?? '';
+    final uni = m['university'] as String?;
+    final dept = m['department'] as String?;
+    final isSelected = _selected.containsKey(id);
+
+    return ListTile(
+      leading: GestureDetector(
+        onTap: () => context.push('/mentor/$id'),
+        child: const CircleAvatar(
+          backgroundColor: AppColors.surface,
+          child: Icon(Icons.person, color: AppColors.textSub, size: 20),
+        ),
+      ),
+      title: Text(nick, style: AppTypography.calloutBold),
+      subtitle: uni != null
+          ? Text(
+              [uni, dept].where((s) => s?.isNotEmpty == true).join(' · '),
+              style: AppTypography.caption.copyWith(color: AppColors.textSub))
+          : null,
+      trailing: showCheckbox
+          ? Checkbox(
+              value: isSelected,
+              activeColor: AppColors.accent,
+              onChanged: (_) => _toggle(id, nick),
+              shape:
+                  RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+            )
+          : null,
+      onTap: () => _toggle(id, nick),
+    );
+  }
+
+  List<Map<String, dynamic>> _applyAllMentorFilters(
+      List<Map<String, dynamic>> mentors) {
+    var result = mentors;
+    if (_query.isNotEmpty) {
+      final q = _query.toLowerCase();
+      result = result.where((m) {
+        final nick =
+            (m['users']?['nickname'] as String? ?? '').toLowerCase();
+        final uni = (m['university'] as String? ?? '').toLowerCase();
+        return nick.contains(q) || uni.contains(q);
+      }).toList();
+    }
+    if (_certLevelFilter != null) {
+      result = result.where((m) {
+        final certs = (m['users']?['mentor_certifications'] as List<dynamic>?) ?? [];
+        if (_certLevelFilter == CertFilterLevel.masterOnly) {
+          return certs.any((c) => c['level'] == 'master');
+        } else {
+          return certs.any(
+              (c) => c['level'] == 'pro' || c['level'] == 'master');
+        }
+      }).toList();
+    }
+    return result;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final favAsync = ref.watch(favoriteMentorsProvider);
+    final allMentorsAsync = ref.watch(_allMentorsPickerProvider);
+
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.85,
+      decoration: const BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.vertical(
+            top: Radius.circular(AppSpacing.bottomSheetRadius)),
+      ),
+      child: Column(
+        children: [
+          // 핸들
+          const SizedBox(height: AppSpacing.sm),
+          Container(
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: AppColors.border,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.base),
+          Padding(
+            padding:
+                const EdgeInsets.symmetric(horizontal: AppSpacing.base),
+            child: Row(
+              children: [
+                Expanded(
+                    child: Text('멘토 선택', style: AppTypography.title3)),
+                if (_selected.isNotEmpty)
+                  Text('${_selected.length}명 선택됨',
+                      style: AppTypography.callout
+                          .copyWith(color: AppColors.accent)),
+              ],
+            ),
+          ),
+          // 탭바
+          TabBar(
+            controller: _tabCtrl,
+            labelColor: AppColors.accent,
+            unselectedLabelColor: AppColors.textSub,
+            indicatorColor: AppColors.accent,
+            tabs: const [
+              Tab(text: '관심 멘토'),
+              Tab(text: '전체 멘토'),
+            ],
+          ),
+          // 전체 멘토 탭용 검색 + 필터
+          ListenableBuilder(
+            listenable: _tabCtrl,
+            builder: (_, __) => _tabCtrl.index == 1
+                ? Column(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(
+                            AppSpacing.base, AppSpacing.sm, AppSpacing.base, 0),
+                        child: TextField(
+                          controller: _searchCtrl,
+                          onChanged: (v) =>
+                              setState(() => _query = v.trim()),
+                          decoration: InputDecoration(
+                            hintText: '닉네임, 대학교 검색',
+                            hintStyle: AppTypography.callout
+                                .copyWith(color: AppColors.textDisabled),
+                            prefixIcon: const Icon(Icons.search,
+                                color: AppColors.textSub),
+                            filled: true,
+                            fillColor: AppColors.surface,
+                            contentPadding: const EdgeInsets.symmetric(
+                                vertical: AppSpacing.sm),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(
+                                  AppSpacing.inputRadius),
+                              borderSide:
+                                  const BorderSide(color: AppColors.border),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(
+                                  AppSpacing.inputRadius),
+                              borderSide:
+                                  const BorderSide(color: AppColors.border),
+                            ),
+                          ),
+                        ),
+                      ),
+                      // 인증 필터 칩
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: AppSpacing.base,
+                            vertical: AppSpacing.xs),
+                        child: Row(
+                          children: [
+                            _FilterChip(
+                              label: '전체',
+                              selected: _certLevelFilter == null,
+                              onTap: () =>
+                                  setState(() => _certLevelFilter = null),
+                            ),
+                            const SizedBox(width: AppSpacing.xs),
+                            _FilterChip(
+                              label: 'PRO 이상',
+                              selected: _certLevelFilter ==
+                                  CertFilterLevel.proOrAbove,
+                              onTap: () => setState(() => _certLevelFilter =
+                                  CertFilterLevel.proOrAbove),
+                            ),
+                            const SizedBox(width: AppSpacing.xs),
+                            _FilterChip(
+                              label: 'MASTER만',
+                              selected: _certLevelFilter ==
+                                  CertFilterLevel.masterOnly,
+                              onTap: () => setState(() => _certLevelFilter =
+                                  CertFilterLevel.masterOnly),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  )
+                : const SizedBox.shrink(),
+          ),
+          // 탭 본문
+          Expanded(
+            child: TabBarView(
+              controller: _tabCtrl,
+              children: [
+                // ── 관심 멘토 탭 ──
+                favAsync.when(
+                  loading: () =>
+                      const Center(child: CircularProgressIndicator()),
+                  error: (_, __) => Center(
+                    child: Text('불러오기 실패',
+                        style: AppTypography.callout
+                            .copyWith(color: AppColors.textSub)),
+                  ),
+                  data: (favs) {
+                    if (favs.isEmpty) {
+                      return Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.favorite_border,
+                                size: 48, color: AppColors.textDisabled),
+                            const SizedBox(height: AppSpacing.sm),
+                            Text('관심 멘토가 없어요',
+                                style: AppTypography.callout
+                                    .copyWith(color: AppColors.textSub)),
+                          ],
+                        ),
+                      );
+                    }
+                    final allSelected = favs.every(
+                        (m) => _selected.containsKey(m['user_id'] as String));
+                    return ListView(
+                      children: [
+                        ListTile(
+                          dense: true,
+                          title: Text('전체 선택',
+                              style: AppTypography.caption.copyWith(
+                                  color: AppColors.accent,
+                                  fontWeight: FontWeight.w600)),
+                          trailing: TextButton(
+                            onPressed: () {
+                              setState(() {
+                                if (allSelected) {
+                                  for (final m in favs) {
+                                    _selected
+                                        .remove(m['user_id'] as String);
+                                  }
+                                } else {
+                                  for (final m in favs) {
+                                    final id = m['user_id'] as String;
+                                    final nick =
+                                        m['users']?['nickname'] as String? ??
+                                            '';
+                                    _selected[id] = nick;
+                                  }
+                                }
+                              });
+                            },
+                            child: Text(allSelected ? '전체 해제' : '전체 선택',
+                                style: AppTypography.caption
+                                    .copyWith(color: AppColors.accent)),
+                          ),
+                        ),
+                        ...favs.map(_mentorTile),
+                      ],
+                    );
+                  },
+                ),
+                // ── 전체 멘토 탭 ──
+                allMentorsAsync.when(
+                  loading: () =>
+                      const Center(child: CircularProgressIndicator()),
+                  error: (_, __) => Center(
+                    child: Text('불러오기 실패',
+                        style: AppTypography.callout
+                            .copyWith(color: AppColors.textSub)),
+                  ),
+                  data: (mentors) {
+                    final filtered = _applyAllMentorFilters(mentors);
+                    if (filtered.isEmpty) {
+                      return Center(
+                        child: Text('검색 결과 없음',
+                            style: AppTypography.callout
+                                .copyWith(color: AppColors.textSub)),
+                      );
+                    }
+                    final allSelected = filtered.every(
+                        (m) => _selected.containsKey(m['user_id'] as String));
+                    return ListView(
+                      children: [
+                        ListTile(
+                          dense: true,
+                          title: Text('전체 선택',
+                              style: AppTypography.caption.copyWith(
+                                  color: AppColors.accent,
+                                  fontWeight: FontWeight.w600)),
+                          trailing: TextButton(
+                            onPressed: () {
+                              setState(() {
+                                if (allSelected) {
+                                  for (final m in filtered) {
+                                    _selected
+                                        .remove(m['user_id'] as String);
+                                  }
+                                } else {
+                                  for (final m in filtered) {
+                                    final id = m['user_id'] as String;
+                                    final nick =
+                                        m['users']?['nickname'] as String? ??
+                                            '';
+                                    _selected[id] = nick;
+                                  }
+                                }
+                              });
+                            },
+                            child: Text(allSelected ? '전체 해제' : '전체 선택',
+                                style: AppTypography.caption
+                                    .copyWith(color: AppColors.accent)),
+                          ),
+                        ),
+                        ...filtered.map(_mentorTile),
+                      ],
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+          // 하단 완료 버튼
+          SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(AppSpacing.base,
+                  AppSpacing.sm, AppSpacing.base, AppSpacing.base),
+              child: AppButton(
+                label: _selected.isEmpty
+                    ? '선택 없이 계속'
+                    : '${_selected.length}명 선택 완료',
+                onPressed: _confirm,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FilterChip extends StatelessWidget {
+  const _FilterChip(
+      {required this.label, required this.selected, required this.onTap});
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md, vertical: AppSpacing.xs),
+        decoration: BoxDecoration(
+          color: selected ? AppColors.accent : Colors.transparent,
+          borderRadius: BorderRadius.circular(AppSpacing.chipRadius),
+          border: Border.all(
+              color: selected ? AppColors.accent : AppColors.border),
+        ),
+        child: Text(label,
+            style: AppTypography.footnote.copyWith(
+              color: selected ? Colors.white : AppColors.textSub,
+              fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+            )),
+      ),
+    );
+  }
+}
+
+final _allMentorsPickerProvider =
+    FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) async {
+  final data = await SupabaseService.client
+      .from(SupabaseService.mentorProfilesTable)
+      .select('*, users!inner(nickname, mentor_certifications(*))')
+      .order('rating', ascending: false)
+      .limit(100);
+  return (data as List).cast<Map<String, dynamic>>();
+});
 
 class _LevelChip extends StatelessWidget {
   const _LevelChip(

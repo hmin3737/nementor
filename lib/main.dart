@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:flutter_quill/flutter_quill.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:firebase_core/firebase_core.dart';
+// import 'package:firebase_core/firebase_core.dart'; // TODO: flutterfire configure 후 활성화
 import 'core/app_theme.dart';
 import 'core/app_router.dart';
 import 'shared/services/supabase_service.dart';
@@ -18,8 +20,8 @@ Future<void> main() async {
   // Supabase 초기화
   await SupabaseService.initialize();
 
-  // Firebase 초기화
-  await Firebase.initializeApp();
+  // Firebase 초기화 (TODO: flutterfire configure 후 활성화)
+  // await Firebase.initializeApp();
 
   runApp(
     const ProviderScope(
@@ -41,6 +43,13 @@ class NeMentorApp extends ConsumerWidget {
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,
       themeMode: ThemeMode.system,
+      localizationsDelegates: const [
+        FlutterQuillLocalizations.delegate,
+        GlobalMaterialLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+      ],
+      supportedLocales: const [Locale('ko'), Locale('en')],
       routerConfig: router,
     );
   }

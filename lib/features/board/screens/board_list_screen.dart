@@ -33,6 +33,11 @@ class BoardListScreen extends ConsumerWidget {
           child: Divider(height: 1, color: AppColors.border),
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.notifications_outlined,
+                color: AppColors.textPrimary),
+            onPressed: () => context.push(AppRoutes.notification),
+          ),
           if (isMentor)
             IconButton(
               icon: const Icon(Icons.edit_outlined, color: AppColors.textPrimary),
@@ -86,37 +91,45 @@ class _PostCard extends StatelessWidget {
             // 작성자 정보
             Row(
               children: [
-                const CircleAvatar(
-                  radius: 16,
-                  backgroundColor: AppColors.border,
-                  child: Icon(Icons.person, size: 16, color: AppColors.textSub),
-                ),
-                const SizedBox(width: AppSpacing.sm),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                GestureDetector(
+                  onTap: () => context.push('/mentor/${post.mentorId}'),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Row(
+                      const CircleAvatar(
+                        radius: 16,
+                        backgroundColor: AppColors.border,
+                        child: Icon(Icons.person, size: 16, color: AppColors.textSub),
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(post.mentorNickname,
-                              style: AppTypography.calloutBold),
-                          if (post.mentorCertifications.isNotEmpty) ...{
-                            const SizedBox(width: AppSpacing.xs),
-                            CertBadge(
-                              subject: post.mentorCertifications.first.subject,
-                              level: post.mentorCertifications.first.level,
-                              compact: true,
-                            ),
-                          },
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(post.mentorNickname,
+                                  style: AppTypography.calloutBold),
+                              if (post.mentorCertifications.isNotEmpty) ...{
+                                const SizedBox(width: AppSpacing.xs),
+                                CertBadge(
+                                  subject: post.mentorCertifications.first.subject,
+                                  level: post.mentorCertifications.first.level,
+                                  compact: true,
+                                ),
+                              },
+                            ],
+                          ),
+                          if (post.mentorUniversity != null)
+                            Text(post.mentorUniversity!,
+                                style: AppTypography.caption
+                                    .copyWith(color: AppColors.textSub)),
                         ],
                       ),
-                      if (post.mentorUniversity != null)
-                        Text(post.mentorUniversity!,
-                            style: AppTypography.caption
-                                .copyWith(color: AppColors.textSub)),
                     ],
                   ),
                 ),
+                const Spacer(),
                 Text(
                   _timeAgo(post.createdAt),
                   style: AppTypography.caption.copyWith(color: AppColors.textDisabled),

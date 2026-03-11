@@ -11,11 +11,11 @@ class SupabaseService {
     await Supabase.initialize(
       url: const String.fromEnvironment(
         'SUPABASE_URL',
-        defaultValue: 'https://YOUR_PROJECT.supabase.co',
+        defaultValue: 'https://jqhhcgqzidvgfznxphkm.supabase.co', // TODO: 실제 URL로 교체
       ),
       anonKey: const String.fromEnvironment(
         'SUPABASE_ANON_KEY',
-        defaultValue: 'YOUR_ANON_KEY',
+        defaultValue: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpxaGhjZ3F6aWR2Z2Z6bnhwaGttIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMwNjg5MDIsImV4cCI6MjA4ODY0NDkwMn0.TFwtj4TEhwRLahZi101vD7GCt2jAFiHvWt1SHpfD6TA', // TODO: 실제 anon key로 교체
       ),
     );
   }
@@ -40,6 +40,8 @@ class SupabaseService {
   static const String notificationsTable = 'notifications';
   static const String mentorConsultationRatesTable =
       'mentor_consultation_rates';
+  static const String certRequestsTable = 'cert_requests';
+  static const String mentorFavoritesTable = 'mentor_favorites';
 
   // ── Storage 버킷 이름 ────────────────────────────────────────
   static const String questionImagesBucket = 'question-images';

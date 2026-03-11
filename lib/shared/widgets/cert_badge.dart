@@ -36,7 +36,7 @@ class CertBadge extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
-            compact ? subject : '$subject ',
+            '$subject ',
             style: (compact ? AppTypography.caption : AppTypography.footnote)
                 .copyWith(
               color: AppColors.textPrimary,

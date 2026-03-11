@@ -7,7 +7,7 @@ import '../../auth/providers/auth_provider.dart';
 final boardListProvider = FutureProvider.autoDispose<List<BoardPost>>((ref) async {
   final rows = await SupabaseService.client
       .from(SupabaseService.boardPostsTable)
-      .select('*, mentor_certifications:mentor_certifications(subject, level)')
+      .select()
       .order('created_at', ascending: false)
       .limit(50);
   return rows.map((e) => BoardPost.fromJson(e)).toList();
@@ -18,11 +18,23 @@ final boardDetailProvider =
     FutureProvider.autoDispose.family<BoardPost?, String>((ref, postId) async {
   final data = await SupabaseService.client
       .from(SupabaseService.boardPostsTable)
-      .select('*, mentor_certifications:mentor_certifications(subject, level)')
+      .select()
       .eq('id', postId)
       .maybeSingle();
   if (data == null) return null;
   return BoardPost.fromJson(data);
+});
+
+// ── 내 칼럼 목록 (멘토용) ─────────────────────────────────────
+final myBoardPostsProvider = FutureProvider.autoDispose<List<BoardPost>>((ref) async {
+  final user = ref.watch(currentUserProvider).valueOrNull;
+  if (user == null) return [];
+  final rows = await SupabaseService.client
+      .from(SupabaseService.boardPostsTable)
+      .select()
+      .eq('mentor_id', user.id)
+      .order('created_at', ascending: false);
+  return rows.map((e) => BoardPost.fromJson(e)).toList();
 });
 
 // ── 댓글 목록 ───────────────────────────────────────────────

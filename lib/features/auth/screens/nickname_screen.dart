@@ -7,6 +7,7 @@ import '../../../core/app_strings.dart';
 import '../../../core/app_typography.dart';
 import '../../../shared/models/user_model.dart';
 import '../../../shared/widgets/app_button.dart';
+import '../../../core/app_router.dart';
 import '../providers/auth_provider.dart';
 
 class NicknameScreen extends ConsumerStatefulWidget {
@@ -37,14 +38,24 @@ class _NicknameScreenState extends ConsumerState<NicknameScreen> {
       _checking = true;
       _isAvailable = null;
     });
-    final ok =
-        await ref.read(authServiceProvider).isNicknameAvailable(nick);
-    if (!mounted) return;
-    setState(() {
-      _isAvailable = ok;
-      _checking = false;
-      _lastChecked = nick;
-    });
+    try {
+      final ok = await ref.read(authServiceProvider).isNicknameAvailable(nick);
+      if (!mounted) return;
+      setState(() {
+        _isAvailable = ok;
+        _checking = false;
+        _lastChecked = nick;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _checking = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('닉네임 확인 중 오류가 발생했어요: $e'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+    }
   }
 
   Future<void> _submit() async {
@@ -88,7 +99,7 @@ class _NicknameScreenState extends ConsumerState<NicknameScreen> {
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white),
-          onPressed: () => context.pop(),
+          onPressed: () => context.canPop() ? context.pop() : context.go(AppRoutes.roleSelect),
         ),
       ),
       body: SafeArea(

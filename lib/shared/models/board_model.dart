@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:equatable/equatable.dart';
 import 'user_model.dart';
 
@@ -38,7 +40,8 @@ class BoardPost extends Equatable {
         mentorNickname: json['mentor_nickname'] as String? ?? '',
         mentorUniversity: json['mentor_university'] as String?,
         mentorCertifications:
-            (json['mentor_certifications'] as List<dynamic>?)
+            ((json['users'] as Map<String, dynamic>?)?['mentor_certifications']
+                        as List<dynamic>?)
                     ?.map((e) => MentorCertification.fromJson(
                         e as Map<String, dynamic>))
                     .toList() ??
@@ -54,8 +57,19 @@ class BoardPost extends Equatable {
       );
 
   String get bodyPreview {
-    final plain = body.replaceAll(RegExp(r'\$.*?\$'), '[수식]');
-    return plain.length > 100 ? '${plain.substring(0, 100)}...' : plain;
+    try {
+      final ops = jsonDecode(body) as List;
+      final plain = ops
+          .where((op) => op['insert'] is String)
+          .map((op) => op['insert'] as String)
+          .join()
+          .replaceAll('\n', ' ')
+          .trim();
+      return plain.length > 100 ? '${plain.substring(0, 100)}...' : plain;
+    } catch (_) {
+      final plain = body.replaceAll(RegExp(r'\$.*?\$'), '[수식]').trim();
+      return plain.length > 100 ? '${plain.substring(0, 100)}...' : plain;
+    }
   }
 
   @override

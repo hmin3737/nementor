@@ -89,6 +89,12 @@ class QuestionModel extends Equatable {
             : null,
         createdAt: DateTime.parse(json['created_at'] as String),
         updatedAt: DateTime.parse(json['updated_at'] as String),
+        filter: () {
+          final filters = json['question_filters'] as List<dynamic>?;
+          if (filters == null || filters.isEmpty) return null;
+          return QuestionFilter.fromJson(
+              filters.first as Map<String, dynamic>);
+        }(),
       );
 
   bool get isOpen => status == QuestionStatus.open;
@@ -97,9 +103,6 @@ class QuestionModel extends Equatable {
   bool get isCancelled => status == QuestionStatus.cancelled;
 
   bool get hasCloseRequest => closeRequestedAt != null;
-
-  DateTime? get autoCloseAt =>
-      closeRequestedAt?.add(const Duration(hours: 24));
 
   @override
   List<Object?> get props => [id, studentId, price, status, createdAt];
