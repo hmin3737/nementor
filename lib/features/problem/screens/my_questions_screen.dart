@@ -66,6 +66,7 @@ class MyQuestionsScreen extends ConsumerWidget {
               question: questions[i],
               onTap: () =>
                   context.push('/student/question/${questions[i].id}'),
+              showStatus: true,
             ),
           );
         },

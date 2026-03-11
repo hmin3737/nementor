@@ -326,10 +326,31 @@ class QuestionSubmitNotifier extends AsyncNotifier<void> {
   Future<bool> giveUp(String questionId, String mentorId) async {
     state = const AsyncLoading();
     try {
-      await _client.rpc('give_up_question', params: {
-        'p_question_id': questionId,
-        'p_mentor_id': mentorId,
-      });
+      // 채팅방 조회
+      final roomData = await _client
+          .from(SupabaseService.chatRoomsTable)
+          .select('id')
+          .eq('question_id', questionId)
+          .maybeSingle();
+      final roomId = roomData?['id'] as String?;
+
+      // 시스템 메시지 삽입
+      if (roomId != null) {
+        await _client.from(SupabaseService.chatMessagesTable).insert({
+          'room_id': roomId,
+          'sender_id': mentorId,
+          'text': '멘토가 답변을 포기했습니다. 질문이 다시 오픈됩니다.',
+          'type': 'system',
+        });
+      }
+
+      // 질문 상태 초기화
+      await _client.from(SupabaseService.questionsTable).update({
+        'status': 'open',
+        'mentor_id': null,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      }).eq('id', questionId).eq('mentor_id', mentorId);
+
       state = const AsyncData(null);
       return true;
     } catch (e, st) {

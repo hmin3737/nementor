@@ -14,6 +14,46 @@ import '../../../shared/widgets/shimmer_box.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../providers/question_provider.dart';
 
+void _openDetailImageViewer(BuildContext context, String url) {
+  Navigator.of(context).push(
+    PageRouteBuilder(
+      opaque: false,
+      barrierColor: Colors.black87,
+      barrierDismissible: true,
+      pageBuilder: (pageCtx, _, __) => Scaffold(
+        backgroundColor: Colors.black87,
+        body: Stack(
+          children: [
+            Center(
+              child: Hero(
+                tag: 'detail_$url',
+                child: InteractiveViewer(
+                  child: Image.network(url, fit: BoxFit.contain),
+                ),
+              ),
+            ),
+            Positioned(
+              top: 48,
+              right: 16,
+              child: GestureDetector(
+                onTap: () => Navigator.of(pageCtx).pop(),
+                child: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: const BoxDecoration(
+                    color: Colors.black54,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.close, color: Colors.white, size: 22),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
 class QuestionDetailScreen extends ConsumerWidget {
   const QuestionDetailScreen({super.key, required this.questionId});
   final String questionId;
@@ -105,13 +145,19 @@ class QuestionDetailScreen extends ConsumerWidget {
                           (url) => Padding(
                             padding:
                                 const EdgeInsets.only(bottom: AppSpacing.sm),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(
-                                  AppSpacing.inputRadius),
-                              child: Image.network(
-                                url,
-                                width: double.infinity,
-                                fit: BoxFit.cover,
+                            child: GestureDetector(
+                              onTap: () => _openDetailImageViewer(context, url),
+                              child: Hero(
+                                tag: 'detail_$url',
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(
+                                      AppSpacing.inputRadius),
+                                  child: Image.network(
+                                    url,
+                                    width: double.infinity,
+                                    fit: BoxFit.cover,
+                                  ),
+                                ),
                               ),
                             ),
                           ),

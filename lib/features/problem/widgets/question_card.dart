@@ -13,12 +13,14 @@ class QuestionCard extends StatefulWidget {
     required this.onTap,
     this.showPreemptButton = false,
     this.onPreempt,
+    this.showStatus = false,
   });
 
   final QuestionModel question;
   final VoidCallback onTap;
   final bool showPreemptButton;
   final VoidCallback? onPreempt;
+  final bool showStatus;
 
   @override
   State<QuestionCard> createState() => _QuestionCardState();
@@ -104,7 +106,7 @@ class _QuestionCardState extends State<QuestionCard>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // 상단: 태그 + 가격
+                // 상단: 태그 + 상태배지 + 가격
                 Row(
                   children: [
                     if (_schoolLevelLabel.isNotEmpty || _subjectLabel.isNotEmpty)
@@ -113,6 +115,10 @@ class _QuestionCardState extends State<QuestionCard>
                             .where((s) => s.isNotEmpty)
                             .join(' · '),
                       ),
+                    if (widget.showStatus) ...[
+                      const SizedBox(width: AppSpacing.xs),
+                      _StatusBadge(status: q.status),
+                    ],
                     const Spacer(),
                     Text(
                       '₩${_formatPrice(q.price)}',
@@ -231,6 +237,38 @@ class _TagChip extends StatelessWidget {
         style: AppTypography.caption.copyWith(
           color: AppColors.textSub,
           fontWeight: FontWeight.w500,
+        ),
+      ),
+    );
+  }
+}
+
+class _StatusBadge extends StatelessWidget {
+  const _StatusBadge({required this.status});
+  final QuestionStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    final (label, color) = switch (status) {
+      QuestionStatus.open => ('대기 중', AppColors.textSub),
+      QuestionStatus.accepted => ('답변 중', const Color(0xFF1D7A3A)),
+      QuestionStatus.closed => ('종료', AppColors.textDisabled),
+      QuestionStatus.cancelled => ('취소됨', AppColors.error),
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: AppSpacing.xs,
+      ),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(AppSpacing.chipRadius),
+      ),
+      child: Text(
+        label,
+        style: AppTypography.caption.copyWith(
+          color: color,
+          fontWeight: FontWeight.w600,
         ),
       ),
     );

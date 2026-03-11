@@ -65,6 +65,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
   final _msgCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
   bool _sending = false;
+  final List<XFile> _pendingImages = [];
 
   @override
   void dispose() {
@@ -115,11 +116,15 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
   Future<void> _pickAndSendImage() async {
     final picker = ImagePicker();
     final XFile? file =
-        await picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
+        await picker.pickImage(source: ImageSource.gallery, imageQuality: 60);
     if (file == null || !mounted) return;
     final user = ref.read(currentUserProvider).valueOrNull;
     if (user == null) return;
-    setState(() => _sending = true);
+
+    // Optimistic: show local preview immediately
+    setState(() => _pendingImages.add(file));
+    _scrollToBottom();
+
     try {
       final bytes = await file.readAsBytes();
       final ext = file.name.contains('.') ? file.name.split('.').last : 'jpg';
@@ -145,7 +150,7 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
         showAppToast(context, AppStrings.serverError, type: ToastType.error);
       }
     } finally {
-      if (mounted) setState(() => _sending = false);
+      if (mounted) setState(() => _pendingImages.remove(file));
     }
   }
 
@@ -252,6 +257,20 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
         .giveUp(questionId, user.id);
     if (!mounted) return;
     if (ok) {
+      // 학생에게 알림
+      final studentId = roomInfo?['student_id'] as String?;
+      if (studentId != null) {
+        try {
+          await SupabaseService.client.from(SupabaseService.notificationsTable).insert({
+            'user_id': studentId,
+            'type': 'question',
+            'title': '멘토가 답변을 포기했어요',
+            'body': '질문이 다시 오픈됩니다. 다른 멘토를 기다려보세요.',
+            'ref_id': questionId,
+          });
+        } catch (_) {}
+      }
+      if (!mounted) return;
       showAppToast(context, '답변을 포기했어요.', type: ToastType.success);
       context.pop();
     } else {
@@ -284,20 +303,49 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
     );
     if (confirmed != true || !mounted) return;
     try {
-      // 채팅방의 question_id 조회 후 즉시 closed 처리
       final room = await SupabaseService.client
           .from(SupabaseService.chatRoomsTable)
-          .select('question_id')
+          .select('question_id, student_id, mentor_id')
           .eq('id', widget.roomId)
           .single();
       final questionId = room['question_id'] as String;
+      final studentId = room['student_id'] as String;
+      final mentorId = room['mentor_id'] as String;
+
       await SupabaseService.client
           .from(SupabaseService.questionsTable)
           .update({'status': 'closed'})
           .eq('id', questionId);
-      if (mounted) {
-        ref.invalidate(_questionStatusProvider(widget.roomId));
-        showAppToast(context, AppStrings.endConfirmed, type: ToastType.success);
+
+      final user = ref.read(currentUserProvider).valueOrNull;
+      final isStudentUser = user?.id == studentId;
+      final notifyUserId = isStudentUser ? mentorId : studentId;
+      final notifyTitle = isStudentUser ? '학생이 답변을 종료했어요' : '멘토가 답변을 종료했어요';
+      try {
+        await SupabaseService.client.from(SupabaseService.notificationsTable).insert({
+          'user_id': notifyUserId,
+          'type': 'question',
+          'title': notifyTitle,
+          'body': '상담이 종료됐어요.',
+          'ref_id': questionId,
+        });
+      } catch (_) {}
+
+      if (!mounted) return;
+      ref.invalidate(_questionStatusProvider(widget.roomId));
+      showAppToast(context, AppStrings.endConfirmed, type: ToastType.success);
+
+      if (isStudentUser) {
+        final mentorData = await SupabaseService.client
+            .from('users')
+            .select('nickname')
+            .eq('id', mentorId)
+            .maybeSingle();
+        final mentorNickname = mentorData?['nickname'] as String? ?? '멘토';
+        if (!mounted) return;
+        context.push(
+          '/review?questionId=$questionId&mentorId=$mentorId&mentorNickname=${Uri.encodeComponent(mentorNickname)}',
+        );
       }
     } catch (e) {
       if (mounted) showAppToast(context, AppStrings.serverError, type: ToastType.error);
@@ -380,7 +428,8 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                       style: AppTypography.callout.copyWith(color: AppColors.textSub))),
               data: (messages) {
                 _scrollToBottom();
-                if (messages.isEmpty) {
+                final total = messages.length + _pendingImages.length;
+                if (total == 0) {
                   return Center(
                       child: Text('첫 메시지를 보내보세요',
                           style: AppTypography.callout.copyWith(color: AppColors.textSub)));
@@ -389,9 +438,19 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
                   controller: _scrollCtrl,
                   padding: const EdgeInsets.symmetric(
                       horizontal: AppSpacing.base, vertical: AppSpacing.base),
-                  itemCount: messages.length,
-                  itemBuilder: (_, i) => _MessageBubble(
-                      message: messages[i], isMe: messages[i].senderId == myId),
+                  itemCount: total,
+                  itemBuilder: (_, i) {
+                    if (i < messages.length) {
+                      return _MessageBubble(
+                          message: messages[i],
+                          isMe: messages[i].senderId == myId,
+                          onAvatarTap: (isStudent && messages[i].senderId == mentorId)
+                              ? () => context.push('/mentor/$mentorId')
+                              : null);
+                    }
+                    return _PendingImageBubble(
+                        file: _pendingImages[i - messages.length]);
+                  },
                 );
               },
             ),
@@ -410,10 +469,52 @@ class _ChatRoomScreenState extends ConsumerState<ChatRoomScreen> {
   }
 }
 
+void _openImageViewer(BuildContext context, String url) {
+  Navigator.of(context).push(
+    PageRouteBuilder(
+      opaque: false,
+      barrierColor: Colors.black87,
+      barrierDismissible: true,
+      pageBuilder: (pageCtx, _, __) => Scaffold(
+        backgroundColor: Colors.black87,
+        body: Stack(
+          children: [
+            Center(
+              child: Hero(
+                tag: url,
+                child: InteractiveViewer(
+                  child: Image.network(url, fit: BoxFit.contain),
+                ),
+              ),
+            ),
+            Positioned(
+              top: 48,
+              right: 16,
+              child: GestureDetector(
+                onTap: () => Navigator.of(pageCtx).pop(),
+                child: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: const BoxDecoration(
+                    color: Colors.black54,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.close, color: Colors.white, size: 22),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
 class _MessageBubble extends StatelessWidget {
-  const _MessageBubble({required this.message, required this.isMe});
+  const _MessageBubble(
+      {required this.message, required this.isMe, this.onAvatarTap});
   final ChatMessage message;
   final bool isMe;
+  final VoidCallback? onAvatarTap;
 
   @override
   Widget build(BuildContext context) {
@@ -462,11 +563,14 @@ class _MessageBubble extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             if (!isMe) ...[
-              const CircleAvatar(
-                  radius: 16,
-                  backgroundColor: AppColors.border,
-                  child:
-                      Icon(Icons.person, size: 16, color: AppColors.textSub)),
+              GestureDetector(
+                onTap: onAvatarTap,
+                child: const CircleAvatar(
+                    radius: 16,
+                    backgroundColor: AppColors.border,
+                    child:
+                        Icon(Icons.person, size: 16, color: AppColors.textSub)),
+              ),
               const SizedBox(width: AppSpacing.sm),
             ],
             Flexible(
@@ -474,13 +578,21 @@ class _MessageBubble extends StatelessWidget {
                 crossAxisAlignment:
                     isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
                 children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(AppSpacing.inputRadius),
-                    child: Image.network(
-                      message.imageUrl!,
-                      width: 200,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => const Icon(Icons.broken_image),
+                  GestureDetector(
+                    onTap: () => _openImageViewer(context, message.imageUrl!),
+                    child: Hero(
+                      tag: message.imageUrl!,
+                      child: ClipRRect(
+                        borderRadius:
+                            BorderRadius.circular(AppSpacing.inputRadius),
+                        child: Image.network(
+                          message.imageUrl!,
+                          width: 200,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) =>
+                              const Icon(Icons.broken_image),
+                        ),
+                      ),
                     ),
                   ),
                   const SizedBox(height: 2),
@@ -505,10 +617,13 @@ class _MessageBubble extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           if (!isMe) ...[
-            const CircleAvatar(
-              radius: 16,
-              backgroundColor: AppColors.border,
-              child: Icon(Icons.person, size: 16, color: AppColors.textSub),
+            GestureDetector(
+              onTap: onAvatarTap,
+              child: const CircleAvatar(
+                radius: 16,
+                backgroundColor: AppColors.border,
+                child: Icon(Icons.person, size: 16, color: AppColors.textSub),
+              ),
             ),
             const SizedBox(width: AppSpacing.sm),
           ],
@@ -549,6 +664,49 @@ class _MessageBubble extends StatelessWidget {
                 ),
               ],
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PendingImageBubble extends StatelessWidget {
+  const _PendingImageBubble({required this.file});
+  final XFile file;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Stack(
+            alignment: Alignment.center,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(AppSpacing.inputRadius),
+                child: Image.file(
+                  File(file.path),
+                  width: 200,
+                  fit: BoxFit.cover,
+                ),
+              ),
+              Container(
+                width: 200,
+                height: 150,
+                decoration: BoxDecoration(
+                  color: Colors.black26,
+                  borderRadius: BorderRadius.circular(AppSpacing.inputRadius),
+                ),
+                child: const Center(
+                  child: CircularProgressIndicator(
+                      color: Colors.white, strokeWidth: 2),
+                ),
+              ),
+            ],
           ),
         ],
       ),

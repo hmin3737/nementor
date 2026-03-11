@@ -29,6 +29,18 @@ final _mentorProfileProvider =
   return data;
 });
 
+final _mentorReviewsProvider =
+    FutureProvider.autoDispose.family<List<Map<String, dynamic>>, String>(
+        (ref, mentorId) async {
+  final data = await SupabaseService.client
+      .from('reviews')
+      .select('rating, comment, created_at, student:users!reviews_student_id_fkey(nickname)')
+      .eq('mentor_id', mentorId)
+      .order('created_at', ascending: false)
+      .limit(10);
+  return (data as List).cast<Map<String, dynamic>>();
+});
+
 const _fieldLabels = {
   'real_name': '실명',
   'middle_school': '중학교',
@@ -270,6 +282,12 @@ class MentorProfileScreen extends ConsumerWidget {
                 ),
               ],
 
+              const SizedBox(height: AppSpacing.sm),
+              _ReviewsSection(
+                mentorId: mentorId,
+                isOwner: user?.id == mentorId,
+              ),
+
               const SizedBox(height: AppSpacing.x4l),
             ],
           );
@@ -421,6 +439,78 @@ class _EducationRow extends StatelessWidget {
                 color: AppColors.accent, size: 16),
         ],
       ),
+    );
+  }
+}
+
+class _ReviewsSection extends ConsumerWidget {
+  const _ReviewsSection({required this.mentorId, required this.isOwner});
+  final String mentorId;
+  final bool isOwner;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final reviewsAsync = ref.watch(_mentorReviewsProvider(mentorId));
+    return reviewsAsync.when(
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
+      data: (reviews) {
+        if (reviews.isEmpty) return const SizedBox.shrink();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Divider(height: 1, color: AppColors.border),
+            const Padding(
+              padding: EdgeInsets.all(AppSpacing.base),
+              child: Text('후기', style: AppTypography.title3),
+            ),
+            ...reviews.map((r) {
+              final rating = r['rating'] as int? ?? 0;
+              final comment = r['comment'] as String?;
+              final nickname = (r['student'] as Map?)?['nickname'] as String? ?? '학생';
+              final createdAt = r['created_at'] != null
+                  ? DateTime.parse(r['created_at'] as String).toLocal()
+                  : null;
+              return Container(
+                margin: const EdgeInsets.fromLTRB(
+                    AppSpacing.base, 0, AppSpacing.base, AppSpacing.sm),
+                padding: const EdgeInsets.all(AppSpacing.base),
+                decoration: BoxDecoration(
+                  color: AppColors.card,
+                  borderRadius: BorderRadius.circular(AppSpacing.cardRadius),
+                  boxShadow: AppSpacing.cardShadow,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        ...List.generate(5, (i) => Icon(
+                          i < rating ? Icons.star_rounded : Icons.star_outline_rounded,
+                          size: 16,
+                          color: i < rating ? AppColors.warning : AppColors.textDisabled,
+                        )),
+                        const SizedBox(width: AppSpacing.sm),
+                        Text(nickname, style: AppTypography.caption.copyWith(color: AppColors.textSub)),
+                        const Spacer(),
+                        if (createdAt != null)
+                          Text(
+                            '${createdAt.year}.${createdAt.month.toString().padLeft(2, '0')}.${createdAt.day.toString().padLeft(2, '0')}',
+                            style: AppTypography.caption.copyWith(color: AppColors.textDisabled),
+                          ),
+                      ],
+                    ),
+                    if (isOwner && comment != null && comment.isNotEmpty) ...[
+                      const SizedBox(height: AppSpacing.xs),
+                      Text(comment, style: AppTypography.callout.copyWith(color: AppColors.textPrimary)),
+                    ],
+                  ],
+                ),
+              );
+            }),
+          ],
+        );
+      },
     );
   }
 }

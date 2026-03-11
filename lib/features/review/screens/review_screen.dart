@@ -149,7 +149,7 @@ class _ReviewScreenState extends ConsumerState<ReviewScreen> {
               // 후기 텍스트
               Align(
                 alignment: Alignment.centerLeft,
-                child: Text('후기 (선택)',
+                child: Text('후기 (선택 · 멘토에게만 노출)',
                     style: AppTypography.subhead
                         .copyWith(fontWeight: FontWeight.w600)),
               ),

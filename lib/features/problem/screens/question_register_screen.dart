@@ -1198,6 +1198,7 @@ final _allMentorsPickerProvider =
   final data = await SupabaseService.client
       .from(SupabaseService.mentorProfilesTable)
       .select('*, users!inner(nickname, mentor_certifications(*))')
+      .eq('verified', true)
       .order('rating', ascending: false)
       .limit(100);
   return (data as List).cast<Map<String, dynamic>>();

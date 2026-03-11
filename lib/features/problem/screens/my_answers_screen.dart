@@ -13,10 +13,10 @@ final _myAnswersProvider =
     FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) async {
   final user = await ref.watch(currentUserProvider.future);
   if (user == null) return [];
-  // 내가 선점(답변)한 질문: chat_rooms에서 mentor_id가 나인 것의 question 정보
   final rows = await SupabaseService.client
       .from(SupabaseService.chatRoomsTable)
-      .select('*, questions!inner(id, title, body, price, status, created_at, subject, school_level)')
+      .select(
+          '*, questions!inner(id, title, body, image_urls, price, status, created_at, subject, school_level)')
       .eq('mentor_id', user.id)
       .order('created_at', ascending: false)
       .limit(50);
@@ -76,7 +76,14 @@ class MyAnswersScreen extends ConsumerWidget {
             itemCount: items.length,
             itemBuilder: (_, i) => _AnswerCard(
               item: items[i],
-              onTap: () {
+              onTapQuestion: () {
+                final q = items[i]['questions'] as Map<String, dynamic>? ?? {};
+                final questionId = q['id'] as String?;
+                if (questionId != null) {
+                  context.push('/student/question/$questionId');
+                }
+              },
+              onTapChat: () {
                 final roomId = items[i]['id'] as String;
                 context.push('/chat/$roomId');
               },
@@ -89,9 +96,14 @@ class MyAnswersScreen extends ConsumerWidget {
 }
 
 class _AnswerCard extends StatelessWidget {
-  const _AnswerCard({required this.item, required this.onTap});
+  const _AnswerCard({
+    required this.item,
+    required this.onTapQuestion,
+    required this.onTapChat,
+  });
   final Map<String, dynamic> item;
-  final VoidCallback onTap;
+  final VoidCallback onTapQuestion;
+  final VoidCallback onTapChat;
 
   @override
   Widget build(BuildContext context) {
@@ -100,6 +112,10 @@ class _AnswerCard extends StatelessWidget {
     final body = q['body'] as String? ?? '';
     final price = q['price'] as int? ?? 0;
     final status = q['status'] as String? ?? '';
+    final imageUrls = (q['image_urls'] as List<dynamic>?)
+            ?.map((e) => e as String)
+            .toList() ??
+        [];
     final createdAt = item['created_at'] != null
         ? DateTime.tryParse(item['created_at'] as String) ?? DateTime.now()
         : DateTime.now();
@@ -112,7 +128,7 @@ class _AnswerCard extends StatelessWidget {
     };
 
     return GestureDetector(
-      onTap: onTap,
+      onTap: onTapQuestion,
       child: Container(
         margin: const EdgeInsets.symmetric(
             horizontal: AppSpacing.base, vertical: AppSpacing.xs),
@@ -126,6 +142,7 @@ class _AnswerCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // 상태 + 가격
             Row(
               children: [
                 Container(
@@ -151,6 +168,7 @@ class _AnswerCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: AppSpacing.sm),
+            // 제목
             if (title != null && title.isNotEmpty) ...[
               Text(title,
                   style: AppTypography.calloutBold,
@@ -158,16 +176,74 @@ class _AnswerCard extends StatelessWidget {
                   overflow: TextOverflow.ellipsis),
               const SizedBox(height: AppSpacing.xs),
             ],
+            // 본문
             Text(body,
                 style: AppTypography.callout
                     .copyWith(color: AppColors.textSub),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis),
+            // 이미지 썸네일
+            if (imageUrls.isNotEmpty) ...[
+              const SizedBox(height: AppSpacing.sm),
+              SizedBox(
+                height: 64,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: imageUrls.length.clamp(0, 4),
+                  separatorBuilder: (_, __) =>
+                      const SizedBox(width: AppSpacing.xs),
+                  itemBuilder: (_, i) => ClipRRect(
+                    borderRadius: BorderRadius.circular(AppSpacing.sm),
+                    child: Image.network(
+                      imageUrls[i],
+                      width: 64,
+                      height: 64,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Container(
+                        width: 64,
+                        height: 64,
+                        color: AppColors.surface,
+                        child: const Icon(Icons.image_outlined,
+                            color: AppColors.textDisabled),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(height: AppSpacing.sm),
-            Text(
-              timeago.format(createdAt, locale: 'ko'),
-              style: AppTypography.caption
-                  .copyWith(color: AppColors.textDisabled),
+            const Divider(height: 1, color: AppColors.border),
+            const SizedBox(height: AppSpacing.sm),
+            // 하단: 시간 + 채팅 버튼
+            Row(
+              children: [
+                const Icon(Icons.access_time,
+                    size: 13, color: AppColors.textSub),
+                const SizedBox(width: AppSpacing.xs),
+                Text(
+                  timeago.format(createdAt, locale: 'ko'),
+                  style: AppTypography.caption
+                      .copyWith(color: AppColors.textDisabled),
+                ),
+                const Spacer(),
+                GestureDetector(
+                  onTap: onTapChat,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.md, vertical: AppSpacing.xs),
+                    decoration: BoxDecoration(
+                      gradient: AppColors.accentGradient,
+                      borderRadius:
+                          BorderRadius.circular(AppSpacing.chipRadius),
+                    ),
+                    child: Text(
+                      status == 'accepted' ? '채팅방 열기' : '채팅 내역',
+                      style: AppTypography.captionBold
+                          .copyWith(color: Colors.white),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -194,9 +270,9 @@ class _AnswerShimmer extends StatelessWidget {
         color: AppColors.card,
         borderRadius: BorderRadius.circular(AppSpacing.cardRadius),
       ),
-      child: Column(
+      child: const Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: const [
+        children: [
           ShimmerBox(width: 80, height: 20),
           SizedBox(height: AppSpacing.sm),
           ShimmerBox(width: double.infinity, height: 16),
